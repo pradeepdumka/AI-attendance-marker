@@ -217,6 +217,7 @@ h3 { margin: 0 0 0.35rem; font-size: 1.45rem; }
 .roles small,
 .form-foot { color: var(--muted); }
 .field input,
+.field select,
 .editor select {
   width: 100%;
   min-height: 2.8rem;
@@ -228,6 +229,7 @@ h3 { margin: 0 0 0.35rem; font-size: 1.45rem; }
   font: inherit;
 }
 .field input:focus,
+.field select:focus,
 .editor select:focus {
   outline: 2px solid var(--teal);
   outline-offset: 1px;

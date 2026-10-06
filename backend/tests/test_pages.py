@@ -13,6 +13,10 @@ def test_home_login_and_register_pages_are_html() -> None:
         dashboard = client.get("/dashboard")
         teachers = client.get("/dashboard/teachers")
         student_form = client.get("/dashboard/students/new")
+        subjects = client.get("/dashboard/subjects")
+        faces = client.get("/dashboard/faces")
+        attendance = client.get("/dashboard/attendance")
+        mark = client.get("/dashboard/attendance/mark")
         styles = client.get("/assets/styles.css")
         script = client.get("/assets/app.js")
 
@@ -26,7 +30,10 @@ def test_home_login_and_register_pages_are_html() -> None:
     assert "Teacher management" in dashboard.text
     assert "Add new student" in dashboard.text
     assert "Add new class" in dashboard.text
-    assert teachers.text == dashboard.text == student_form.text
+    assert "Subject management" in dashboard.text
+    assert "Face enrollment" in dashboard.text
+    assert "Mark attendance" in dashboard.text
+    assert teachers.text == dashboard.text == student_form.text == subjects.text == faces.text == attendance.text == mark.text
     assert 'id="nav-toggle"' in dashboard.text
     assert styles.status_code == script.status_code == 200
     assert "--ink:" in styles.text

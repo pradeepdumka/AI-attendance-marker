@@ -84,6 +84,28 @@ const lists = {
       field("status", "Status", { type: "select", options: statusOptions }),
     ],
   },
+  subjects: {
+    title: "Subjects",
+    addTitle: "Add subject",
+    noun: "subject",
+    path: "/admin/subjects",
+    idKey: "subject_id",
+    columns: [
+      linkColumn("Subject", (row) => row.name),
+      textColumn("Code", (row) => row.code),
+      textColumn("Class", (row) => className(row.class_id)),
+      textColumn("Teacher", (row) => teacherName(row.teacher_id)),
+      statusColumn(),
+      actionsColumn(),
+    ],
+    fields: [
+      field("name", "Subject name", { required: true }),
+      field("code", "Code", { required: true }),
+      field("class_id", "Class", { type: "select", required: true, source: "classes", numeric: true }),
+      field("teacher_id", "Teacher", { type: "select", clearable: true, source: "teachers", numeric: true }),
+      field("status", "Status", { type: "select", options: statusOptions }),
+    ],
+  },
 };
 
 const views = {
@@ -91,6 +113,10 @@ const views = {
   list: "list-view",
   detail: "detail-view",
   form: "form-view",
+  faces: "face-list-view",
+  face: "face-form-view",
+  attendance: "attendance-view",
+  mark: "mark-view",
 };
 
 let routeTicket = 0;
@@ -100,6 +126,9 @@ let editing = null;
 let pendingDelete = null;
 let teachers = [];
 let schoolClasses = [];
+let lessonClasses = [];
+let lessonSubjects = [];
+let lessonStudents = [];
 
 document.addEventListener("DOMContentLoaded", () => {
   if (!sessionStorage.getItem(tokenKey)) {
@@ -129,6 +158,40 @@ document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("detail-delete").addEventListener("click", askDelete);
   document.getElementById("delete-yes").addEventListener("click", confirmDelete);
   document.getElementById("delete-no").addEventListener("click", hideDelete);
+  document.getElementById("face-list-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    go(facePath({ page: 1, search: value(event.currentTarget, "search") }));
+  });
+  document.getElementById("face-prev").addEventListener("click", () => turnFace(-1));
+  document.getElementById("face-next").addEventListener("click", () => turnFace(1));
+  document.getElementById("face-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    saveFace("POST");
+  });
+  document.getElementById("face-replace").addEventListener("click", () => saveFace("PUT"));
+  document.getElementById("face-cancel").addEventListener("click", () => go("/dashboard/faces"));
+  document.getElementById("attendance-form").addEventListener("submit", (event) => event.preventDefault());
+  document.getElementById("attendance-form").addEventListener("change", moveAttendance);
+  document.getElementById("attendance-prev").addEventListener("click", () => turnAttendance(-1));
+  document.getElementById("attendance-next").addEventListener("click", () => turnAttendance(1));
+  document.getElementById("camera-form").addEventListener("submit", saveCameraMark);
+  document.getElementById("manual-form").addEventListener("submit", saveManualMark);
+  document.querySelector("#camera-form select[name=class_id]").addEventListener("change", (event) => {
+    fillSubjectSelect(
+      document.querySelector("#camera-form select[name=subject_id]"),
+      event.currentTarget.value,
+      "",
+      "Choose a subject",
+    );
+  });
+  document.querySelector("#manual-form select[name=class_id]").addEventListener("change", (event) => {
+    fillSubjectSelect(
+      document.querySelector("#manual-form select[name=subject_id]"),
+      event.currentTarget.value,
+      "",
+      "Choose a subject",
+    );
+  });
   window.addEventListener("popstate", showRoute);
   window.addEventListener("hashchange", () => {
     if (redirectLegacy()) showRoute();
@@ -157,7 +220,15 @@ function followAppLink(event) {
 }
 
 function redirectLegacy() {
-  const next = { dashboard: "/dashboard", teachers: "/dashboard/teachers", students: "/dashboard/students", classes: "/dashboard/classes" }[location.hash.slice(1)];
+  const next = {
+    dashboard: "/dashboard",
+    teachers: "/dashboard/teachers",
+    students: "/dashboard/students",
+    classes: "/dashboard/classes",
+    subjects: "/dashboard/subjects",
+    faces: "/dashboard/faces",
+    attendance: "/dashboard/attendance",
+  }[location.hash.slice(1)];
   if (!next || location.pathname !== "/dashboard") return false;
   history.replaceState(null, "", next);
   return true;
@@ -168,6 +239,16 @@ function parseRoute() {
   if (parts[0] !== "dashboard") return { name: "missing" };
   if (parts.length === 1) return { name: "home" };
   const resource = parts[1];
+  if (resource === "faces") {
+    if (parts.length === 2) return { name: "faces", resource };
+    if (parts.length === 3 && /^\d+$/.test(parts[2])) return { name: "face", resource, id: parts[2] };
+    return { name: "missing" };
+  }
+  if (resource === "attendance") {
+    if (parts.length === 2) return { name: "attendance", resource };
+    if (parts.length === 3 && parts[2] === "mark") return { name: "mark", resource };
+    return { name: "missing" };
+  }
   if (!lists[resource]) return { name: "missing" };
   if (parts.length === 2) return { name: "list", resource };
   if (parts.length === 3 && parts[2] === "new") return { name: "form", resource };
@@ -203,6 +284,10 @@ function showRoute() {
   else if (route.name === "list") loadList(ticket);
   else if (route.name === "detail") loadDetail(ticket);
   else if (route.name === "form") loadForm(ticket);
+  else if (route.name === "faces") loadFaces(ticket);
+  else if (route.name === "face") loadFace(ticket);
+  else if (route.name === "attendance") loadAttendance(ticket);
+  else if (route.name === "mark") loadMark(ticket);
   else showMessage("That page was not found.");
   revealFlash(ticket);
 }
@@ -218,6 +303,10 @@ function revealFlash(ticket) {
 
 function pageTitle() {
   if (route.name === "home" || route.name === "missing") return "Dashboard";
+  if (route.name === "faces") return "Face enrollment";
+  if (route.name === "face") return "Enroll face";
+  if (route.name === "attendance") return "Attendance";
+  if (route.name === "mark") return "Mark attendance";
   const list = lists[route.resource];
   if (route.name === "list") return list.title;
   if (route.name === "detail") return "Details";
@@ -232,9 +321,15 @@ function setHeading(text) {
 function markCurrent() {
   const current = route.name === "form" && !route.id
     ? `/dashboard/${route.resource}/new`
-    : route.resource
-      ? `/dashboard/${route.resource}`
-      : "/dashboard";
+    : route.name === "mark"
+      ? "/dashboard/attendance/mark"
+      : route.name === "faces" || route.name === "face"
+        ? "/dashboard/faces"
+        : route.name === "attendance"
+          ? "/dashboard/attendance"
+          : route.resource
+            ? `/dashboard/${route.resource}`
+            : "/dashboard";
   document.querySelectorAll(".sidebar a[data-route]").forEach((link) => {
     if (link.dataset.route === current) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
@@ -261,34 +356,41 @@ function paintHello(blocked) {
   hello.dataset.blocked = blocked ? "1" : "0";
   const welcome = signedIn ? `Welcome back, ${signedIn.first_name}.` : "Welcome back.";
   hello.textContent = blocked
-    ? `${welcome} Teacher, student, and class lists are open to an admin.`
+    ? `${welcome} Teacher, student, class, and subject lists are open to an admin.`
     : welcome;
 }
 
 async function loadHome(ticket) {
   const cards = document.getElementById("stat-cards");
   cards.replaceChildren();
-  const entries = await Promise.all(
-    Object.entries(lists).map(async ([key, list]) => {
-      const { response, data } = await request(`${list.path}?page=1&page_size=1`);
-      return [key, list.title, response.ok ? data.total : null, response.status];
-    }),
-  );
+  const [entries, attendance] = await Promise.all([
+    Promise.all(
+      Object.entries(lists).map(async ([key, list]) => {
+        const { response, data } = await request(`${list.path}?page=1&page_size=1`);
+        return [key, list.title, response.ok ? data.total : null, response.status];
+      }),
+    ),
+    request("/attendance/today?page=1&page_size=1"),
+  ]);
   if (ticket !== routeTicket) return;
   paintHello(entries.some((entry) => entry[3] === 403));
-  for (const [key, title, total] of entries) {
-    const item = document.createElement("li");
-    const heading = document.createElement("h3");
-    const link = document.createElement("a");
-    link.href = `/dashboard/${key}`;
-    link.textContent = title;
-    heading.append(link);
-    const count = document.createElement("p");
-    count.className = "stat";
-    count.textContent = total === null ? "—" : String(total);
-    item.append(heading, count);
-    cards.append(item);
-  }
+  for (const [key, title, total] of entries) addStatCard(cards, key, title, total);
+  addStatCard(cards, "faces", "Face enrollment", null);
+  addStatCard(cards, "attendance", "Attendance", attendance.response.ok ? attendance.data.total : null);
+}
+
+function addStatCard(cards, key, title, total) {
+  const item = document.createElement("li");
+  const heading = document.createElement("h3");
+  const link = document.createElement("a");
+  link.href = `/dashboard/${key}`;
+  link.textContent = title;
+  heading.append(link);
+  const count = document.createElement("p");
+  count.className = "stat";
+  count.textContent = total === null ? "—" : String(total);
+  item.append(heading, count);
+  cards.append(item);
 }
 
 function listQuery() {
@@ -456,10 +558,20 @@ function statusCell(status) {
 }
 
 function statusPill(status) {
+  const names = {
+    ACTIVE: ["Active", "pill-present"],
+    INACTIVE: ["Inactive", "pill-absent"],
+    PRESENT: ["Present", "pill-present"],
+    ABSENT: ["Absent", "pill-absent"],
+    LATE: ["Late", "pill-late"],
+    EXCUSED: ["Excused", "pill-late"],
+    ENROLLED: ["Enrolled", "pill-present"],
+    NOT_ENROLLED: ["Not enrolled", "pill-absent"],
+  };
+  const [text, tone] = names[status] || [label(status) || "—", "pill-absent"];
   const pill = document.createElement("span");
-  const active = status === "ACTIVE";
-  pill.className = `pill ${active ? "pill-present" : "pill-absent"}`;
-  pill.textContent = active ? "Active" : "Inactive";
+  pill.className = `pill ${tone}`;
+  pill.textContent = text;
   return pill;
 }
 
@@ -520,7 +632,9 @@ function shown(item, row) {
 
 function recordTitle(row) {
   if (row.first_name) return `${row.first_name} ${row.last_name}`;
-  if (row.name) return `${row.name}-${row.section}`;
+  if (row.name && row.section) return `${row.name}-${row.section}`;
+  if (row.name && row.code) return `${row.code} · ${row.name}`;
+  if (row.name) return row.name;
   return "Details";
 }
 
@@ -563,9 +677,9 @@ function fieldControl(item, row) {
     }
   } else {
     const choices = item.source === "teachers"
-      ? teacherChoices(row)
+      ? teacherChoices(row, item)
       : item.source === "classes"
-        ? classChoices(row)
+        ? classChoices(row, item)
         : item.options;
     for (const [optionValue, optionLabel] of choices) {
       const option = document.createElement("option");
@@ -721,14 +835,14 @@ async function refreshTeachers() {
   );
 }
 
-function teacherChoices(row) {
-  const choices = [["", "Not assigned"]];
+function teacherChoices(row, item) {
+  const choices = [["", item?.required ? "Choose a teacher" : "Not assigned"]];
   const seen = new Set();
   for (const teacher of teachers) {
     seen.add(teacher.teacher_id);
     choices.push([String(teacher.teacher_id), `${teacher.teacher_id} · ${teacher.first_name} ${teacher.last_name}`]);
   }
-  const current = row?.class_teacher_id;
+  const current = item?.name === "teacher_id" ? row?.teacher_id : row?.class_teacher_id;
   if (current && !seen.has(current)) choices.push([String(current), `Teacher ${current}`]);
   return choices;
 }
@@ -752,8 +866,8 @@ async function refreshClasses() {
   schoolClasses = rows.sort((left, right) => classLabel(left).localeCompare(classLabel(right)));
 }
 
-function classChoices(row) {
-  const choices = [["", "Not assigned"]];
+function classChoices(row, item) {
+  const choices = [["", item?.required ? "Choose a class" : "Not assigned"]];
   const seen = new Set();
   for (const schoolClass of schoolClasses) {
     if (schoolClass.status !== "ACTIVE" && schoolClass.class_id !== row?.class_id) continue;
@@ -773,4 +887,422 @@ function className(id) {
   if (!id) return "";
   const schoolClass = schoolClasses.find((item) => item.class_id === id);
   return schoolClass ? classLabel(schoolClass) : `Class ${id}`;
+}
+
+function facePath(state) {
+  const params = new URLSearchParams();
+  if (state.page > 1) params.set("page", String(state.page));
+  if (state.search) params.set("search", state.search);
+  const query = params.toString();
+  return `/dashboard/faces${query ? `?${query}` : ""}`;
+}
+
+function turnFace(step) {
+  if (route.name !== "faces") return;
+  const state = listQuery();
+  go(facePath({ ...state, page: Math.max(1, state.page + step) }));
+}
+
+async function loadFaces(ticket) {
+  const state = listQuery();
+  const form = document.getElementById("face-list-form");
+  form.elements.search.value = state.search;
+  const params = new URLSearchParams({ page: String(state.page), page_size: String(pageSize) });
+  if (state.search) params.set("search", state.search);
+  const body = document.getElementById("face-body");
+  body.replaceChildren(messageRow(5, "Loading…"));
+  await refreshClasses();
+  const { response, data } = await request(`/admin/students?${params}`);
+  if (ticket !== routeTicket) return;
+  if (!response.ok) {
+    body.replaceChildren(messageRow(5, "No data to display"));
+    document.getElementById("face-summary").textContent = "Showing 0 – 0 of 0";
+    setNamedPager("face", state.page, 0);
+    showMessage(response.status === 403 ? "Admin access is required for face enrollment." : errorText(data));
+    return;
+  }
+  const rows = await Promise.all((data.items || []).map(async (student) => {
+    const face = await request(`/students/${student.student_id}/face`);
+    return { student, face: face.response.ok ? face.data : null };
+  }));
+  if (ticket !== routeTicket) return;
+  if (!rows.length) {
+    body.replaceChildren(messageRow(5, "No data to display"));
+  } else {
+    body.replaceChildren(...rows.map(faceRow));
+  }
+  const total = data.total || 0;
+  const start = total === 0 ? 0 : (state.page - 1) * pageSize + 1;
+  const end = Math.min(state.page * pageSize, total);
+  document.getElementById("face-summary").textContent = `Showing ${start} – ${end} of ${total}`;
+  setNamedPager("face", state.page, total);
+}
+
+function faceRow({ student, face }) {
+  const row = document.createElement("tr");
+  const name = document.createElement("td");
+  const link = document.createElement("a");
+  link.href = `/dashboard/faces/${student.student_id}`;
+  link.textContent = `${student.first_name} ${student.last_name}`;
+  name.append(link);
+  const roll = document.createElement("td");
+  roll.textContent = student.roll_number || "—";
+  const schoolClass = document.createElement("td");
+  schoolClass.textContent = className(student.class_id) || "—";
+  const status = document.createElement("td");
+  if (face) {
+    const pill = statusPill(face.status);
+    if (face.status === "ENROLLED") pill.textContent = `Enrolled · ${face.sample_count}`;
+    status.append(pill);
+  } else {
+    status.textContent = "—";
+  }
+  const action = document.createElement("td");
+  action.className = "row-actions";
+  const enroll = document.createElement("a");
+  enroll.className = "text-button";
+  enroll.href = `/dashboard/faces/${student.student_id}`;
+  enroll.textContent = face?.status === "ENROLLED" ? "Update" : "Enroll";
+  action.append(enroll);
+  row.append(name, roll, schoolClass, status, action);
+  return row;
+}
+
+async function loadFace(ticket) {
+  const fields = document.getElementById("face-fields");
+  fields.replaceChildren();
+  document.getElementById("face-form").hidden = true;
+  const [studentResult, faceResult] = await Promise.all([
+    request(`/admin/students/${route.id}`),
+    request(`/students/${route.id}/face`),
+  ]);
+  if (ticket !== routeTicket) return;
+  if (!studentResult.response.ok) {
+    showMessage(studentResult.response.status === 403 ? "Admin access is required." : errorText(studentResult.data));
+    return;
+  }
+  const student = studentResult.data;
+  const face = faceResult.response.ok ? faceResult.data : null;
+  setHeading(`${student.first_name} ${student.last_name}`);
+  const blocks = [
+    ["Student", `${student.first_name} ${student.last_name}`],
+    ["Roll number", student.roll_number || "—"],
+    ["Samples", face ? String(face.sample_count) : "—"],
+  ];
+  fields.replaceChildren(...blocks.map(([caption, text]) => definition(caption, text)));
+  const statusWrap = definition("Face", "");
+  statusWrap.querySelector("dd").replaceChildren(statusPill(face?.status || "NOT_ENROLLED"));
+  fields.append(statusWrap);
+  const add = document.getElementById("face-add");
+  const full = Boolean(face && face.sample_count >= 5);
+  add.disabled = full;
+  document.getElementById("face-hint").textContent = full
+    ? "This student already has 5 samples. Replace them to store a new image."
+    : "One clear photo. The image is checked and not stored.";
+  document.getElementById("face-form").hidden = false;
+}
+
+function definition(caption, text) {
+  const wrap = document.createElement("div");
+  const term = document.createElement("dt");
+  term.textContent = caption;
+  const valueNode = document.createElement("dd");
+  valueNode.textContent = text;
+  wrap.append(term, valueNode);
+  return wrap;
+}
+
+async function saveFace(method) {
+  if (route.name !== "face") return;
+  const form = document.getElementById("face-form");
+  const file = form.elements.image.files?.[0];
+  if (!file) {
+    showMessage("Choose an image.");
+    return;
+  }
+  const body = new FormData();
+  body.append("image", file);
+  const buttons = [...form.querySelectorAll("button")];
+  buttons.forEach((button) => { button.disabled = true; });
+  try {
+    const { response, data } = await requestForm(`/students/${route.id}/face`, body, method);
+    if (!response.ok) {
+      showMessage(errorText(data));
+      return;
+    }
+    sessionStorage.setItem(flashKey, method === "PUT" ? "Face samples replaced." : "Face sample added.");
+    form.elements.image.value = "";
+    showRoute();
+  } catch {
+    showMessage("The server could not be reached.");
+  } finally {
+    buttons.forEach((button) => { button.disabled = false; });
+  }
+}
+
+function attendanceQuery() {
+  const params = new URLSearchParams(location.search);
+  return {
+    page: Math.max(1, Number(params.get("page")) || 1),
+    classId: params.get("class_id") || "",
+    subjectId: params.get("subject_id") || "",
+  };
+}
+
+function attendancePath(state) {
+  const params = new URLSearchParams();
+  if (state.page > 1) params.set("page", String(state.page));
+  if (state.classId) params.set("class_id", state.classId);
+  if (state.subjectId) params.set("subject_id", state.subjectId);
+  const query = params.toString();
+  return `/dashboard/attendance${query ? `?${query}` : ""}`;
+}
+
+function moveAttendance() {
+  if (route.name !== "attendance") return;
+  const form = document.getElementById("attendance-form");
+  const classId = value(form, "class_id");
+  let subjectId = value(form, "subject_id");
+  if (subjectId && !subjectChoices(classId).some(([id]) => id === subjectId)) subjectId = "";
+  go(attendancePath({ page: 1, classId, subjectId }));
+}
+
+function turnAttendance(step) {
+  if (route.name !== "attendance") return;
+  const state = attendanceQuery();
+  go(attendancePath({ ...state, page: Math.max(1, state.page + step) }));
+}
+
+async function loadAttendance(ticket) {
+  const state = attendanceQuery();
+  const body = document.getElementById("attendance-body");
+  body.replaceChildren(messageRow(8, "Loading…"));
+  await loadLessonCatalogs();
+  if (ticket !== routeTicket) return;
+  const form = document.getElementById("attendance-form");
+  fillClassSelect(form.elements.class_id, state.classId, "All");
+  fillSubjectSelect(form.elements.subject_id, state.classId, state.subjectId, "All");
+  const params = new URLSearchParams({ page: String(state.page), page_size: String(pageSize) });
+  if (state.classId) params.set("class_id", state.classId);
+  if (state.subjectId) params.set("subject_id", state.subjectId);
+  const { response, data } = await request(`/attendance/today?${params}`);
+  if (ticket !== routeTicket) return;
+  if (!response.ok) {
+    body.replaceChildren(messageRow(8, "No data to display"));
+    document.getElementById("attendance-summary").textContent = "Showing 0 – 0 of 0";
+    setNamedPager("attendance", state.page, 0);
+    showMessage(errorText(data));
+    return;
+  }
+  const items = data.items || [];
+  body.replaceChildren(...(items.length ? items.map(attendanceRow) : [messageRow(8, "No data to display")]));
+  const total = data.total || 0;
+  const start = total === 0 ? 0 : (state.page - 1) * pageSize + 1;
+  const end = Math.min(state.page * pageSize, total);
+  document.getElementById("attendance-summary").textContent = `Showing ${start} – ${end} of ${total}`;
+  setNamedPager("attendance", state.page, total);
+}
+
+function attendanceRow(row) {
+  const line = document.createElement("tr");
+  const values = [
+    `${row.first_name} ${row.last_name}`,
+    row.roll_number,
+    lessonClassName(row.class_id),
+    lessonSubjectName(row.subject_id),
+  ];
+  for (const text of values) {
+    const cell = document.createElement("td");
+    cell.textContent = text || "—";
+    line.append(cell);
+  }
+  const status = document.createElement("td");
+  status.append(statusPill(row.status));
+  const when = document.createElement("td");
+  when.textContent = clock(row.check_in_time);
+  const method = document.createElement("td");
+  method.textContent = row.recognition_method === "FACE_RECOGNITION" ? "Face recognition" : "Manual";
+  const confidence = document.createElement("td");
+  confidence.textContent = row.confidence_score == null ? "—" : Number(row.confidence_score).toFixed(2);
+  line.append(status, when, method, confidence);
+  return line;
+}
+
+async function loadMark(ticket) {
+  await loadLessonCatalogs();
+  if (ticket !== routeTicket) return;
+  const camera = document.getElementById("camera-form");
+  const manual = document.getElementById("manual-form");
+  fillClassSelect(camera.elements.class_id, "", "Choose a class");
+  fillSubjectSelect(camera.elements.subject_id, "", "", "Choose a subject");
+  fillClassSelect(manual.elements.class_id, "", "Choose a class");
+  fillSubjectSelect(manual.elements.subject_id, "", "", "Choose a subject");
+  fillStudentSelect(manual.elements.student_id);
+  manual.hidden = lessonStudents.length === 0;
+}
+
+async function saveCameraMark(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const classId = value(form, "class_id");
+  const subjectId = value(form, "subject_id");
+  const file = form.elements.image.files?.[0];
+  if (!classId || !subjectId) {
+    showMessage("Choose a class and a subject.");
+    return;
+  }
+  if (!file) {
+    showMessage("Choose a camera frame.");
+    return;
+  }
+  const body = new FormData();
+  body.append("class_id", classId);
+  body.append("subject_id", subjectId);
+  body.append("image", file);
+  await submitMark(form, () => requestForm("/attendance/mark", body, "POST"));
+}
+
+async function saveManualMark(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const studentId = value(form, "student_id");
+  const classId = value(form, "class_id");
+  const subjectId = value(form, "subject_id");
+  if (!studentId || !classId || !subjectId) {
+    showMessage("Choose a student, class, and subject.");
+    return;
+  }
+  await submitMark(form, () => request("/attendance/manual", {
+    student_id: Number(studentId),
+    class_id: Number(classId),
+    subject_id: Number(subjectId),
+    status: value(form, "status"),
+  }));
+}
+
+async function submitMark(form, send) {
+  const button = form.querySelector("button[type=submit]");
+  button.disabled = true;
+  try {
+    const { response, data } = await send();
+    if (!response.ok) {
+      showMessage(errorText(data));
+      return;
+    }
+    sessionStorage.setItem(flashKey, data.created ? "Attendance marked." : "Already marked today.");
+    go("/dashboard/attendance");
+  } catch {
+    showMessage("The server could not be reached.");
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function loadLessonCatalogs() {
+  [lessonClasses, lessonSubjects, lessonStudents] = await Promise.all([
+    pagedCatalog("/admin/classes", "/teacher/classes"),
+    pagedCatalog("/admin/subjects", "/teacher/subjects"),
+    pagedCatalog("/admin/students", ""),
+  ]);
+  lessonClasses.sort((left, right) => classLabel(left).localeCompare(classLabel(right)));
+  lessonSubjects.sort((left, right) => String(left.name).localeCompare(String(right.name)));
+  lessonStudents.sort((left, right) =>
+    `${left.first_name} ${left.last_name}`.localeCompare(`${right.first_name} ${right.last_name}`),
+  );
+}
+
+async function pagedCatalog(adminPath, teacherPath) {
+  const rows = [];
+  let path = adminPath;
+  let pageNumber = 1;
+  while (pageNumber <= 20) {
+    const { response, data } = await request(`${path}?page=${pageNumber}&page_size=100`);
+    if (response.status === 403 && teacherPath && path === adminPath) {
+      path = teacherPath;
+      pageNumber = 1;
+      rows.length = 0;
+      continue;
+    }
+    if (!response.ok) return rows;
+    rows.push(...(data.items || []));
+    if (!data.items?.length || rows.length >= (data.total || 0)) break;
+    pageNumber += 1;
+  }
+  return rows;
+}
+
+function fillClassSelect(select, current, blank) {
+  fillSelect(select, lessonClasses.map((schoolClass) => [String(schoolClass.class_id), classLabel(schoolClass)]), current, blank);
+}
+
+function fillSubjectSelect(select, classId, current, blank) {
+  fillSelect(select, subjectChoices(classId), current, blank);
+}
+
+function fillStudentSelect(select) {
+  fillSelect(
+    select,
+    lessonStudents.map((student) => [
+      String(student.student_id),
+      `${student.roll_number} · ${student.first_name} ${student.last_name}`,
+    ]),
+    "",
+    lessonStudents.length ? "Choose a student" : "No students yet",
+  );
+}
+
+function subjectChoices(classId) {
+  return lessonSubjects
+    .filter((subject) => subject.status !== "INACTIVE")
+    .filter((subject) => !classId || String(subject.class_id) === String(classId))
+    .map((subject) => [String(subject.subject_id), `${subject.code} · ${subject.name}`]);
+}
+
+function fillSelect(select, choices, current, blank) {
+  select.replaceChildren();
+  if (blank != null) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = blank;
+    select.append(option);
+  }
+  for (const [optionValue, optionLabel] of choices) {
+    const option = document.createElement("option");
+    option.value = optionValue;
+    option.textContent = optionLabel;
+    select.append(option);
+  }
+  const wanted = current == null ? "" : String(current);
+  select.value = [...select.options].some((option) => option.value === wanted) ? wanted : "";
+}
+
+function lessonClassName(id) {
+  const schoolClass = lessonClasses.find((item) => item.class_id === id);
+  return schoolClass ? classLabel(schoolClass) : className(id);
+}
+
+function lessonSubjectName(id) {
+  const subject = lessonSubjects.find((item) => item.subject_id === id);
+  return subject ? subject.name : `Subject ${id}`;
+}
+
+function clock(value) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return String(value);
+  return parsed.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function setNamedPager(prefix, page, total) {
+  document.getElementById(`${prefix}-prev`).disabled = page <= 1;
+  document.getElementById(`${prefix}-next`).disabled = page * pageSize >= total;
+}
+
+async function requestForm(path, body, method) {
+  const headers = {};
+  const token = sessionStorage.getItem(tokenKey);
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const response = await fetch(path, { method, headers, body });
+  const data = await response.json().catch(() => ({}));
+  return { response, data };
 }
