@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Attendance Marker</title>
+  <meta name="description" content="Sign in to mark and manage school attendance for students, teachers, and admins.">
+  <link rel="stylesheet" href="/assets/styles.css">
+</head>
+<body data-page="home">
+  <a class="skip" href="#content">Skip to content</a>
+  <header class="site-header">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">✓</span>
+      <span>Attendance</span>
+    </a>
+    <nav class="nav" aria-label="Primary">
+      <a href="/" data-nav="home" aria-current="page">Home</a>
+      <a href="/login" data-nav="login" data-guest>Sign in</a>
+      <a href="/register" data-nav="register" data-guest>Register</a>
+      <a href="/dashboard" data-nav="dashboard" data-user hidden>Dashboard</a>
+      <button type="button" class="text-button" data-logout data-user hidden>Log out</button>
+    </nav>
+  </header>
+
+  <main id="content">
+    <section class="hero">
+      <div class="hero-copy">
+        <p class="eyebrow">School attendance</p>
+        <h1>The class is marked before the lesson starts.</h1>
+        <p class="lede">Students, teachers, and admins share one roster. Sign in to see your place in it. Face recognition comes later; accounts work today.</p>
+        <div class="actions">
+          <a class="button" href="/register" data-guest-cta>Create an account</a>
+          <a class="button button-quiet" href="/login" data-guest>I already have one</a>
+          <a class="button" href="/dashboard" data-user hidden>Open the dashboard</a>
+        </div>
+      </div>
+      <aside class="roster" aria-label="Example roll for Grade 10, section A">
+        <div class="roster-top">
+          <p>Grade 10 · A</p>
+          <p>This morning</p>
+        </div>
+        <ul>
+          <li><span>Ada Lovelace</span><span class="pill pill-present">Present</span></li>
+          <li><span>Grace Hopper</span><span class="pill pill-present">Present</span></li>
+          <li><span>Alan Turing</span><span class="pill pill-late">Late</span></li>
+          <li><span>Lin Student</span><span class="pill pill-absent">Absent</span></li>
+        </ul>
+      </aside>
+    </section>
+
+    <section class="band" aria-labelledby="roles-title">
+      <h2 id="roles-title">Three ways in</h2>
+      <ul class="cards">
+        <li>
+          <h3>Students</h3>
+          <p>Register, then open the profile tied to your class.</p>
+        </li>
+        <li>
+          <h3>Teachers</h3>
+          <p>See the classes and subjects an admin assigned to you.</p>
+        </li>
+        <li>
+          <h3>Admins</h3>
+          <p>Keep the roster, sections, subjects, and enrollment in order.</p>
+        </li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <p>AI Attendance Marker</p>
+    <nav aria-label="Footer">
+      <a href="/login" data-guest>Sign in</a>
+      <a href="/register" data-guest>Register</a>
+    </nav>
+  </footer>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

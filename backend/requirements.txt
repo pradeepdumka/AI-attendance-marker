@@ -1,0 +1,19 @@
+# Password hashing (Argon2id via pwdlib) and signed JWT access tokens.
+pwdlib[argon2]>=0.2.1
+PyJWT>=2.10.0
+
+# OpenCV and face recognition are later phases.
+
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic-settings>=2.6.0
+python-dotenv>=1.0.1
+
+# MySQL access. SQLAlchemy 2.x talks to MySQL through the PyMySQL driver.
+SQLAlchemy>=2.0.36
+PyMySQL>=1.1.1
+alembic>=1.14.0
+
+# Tests for the health endpoint. httpx2 is what Starlette's TestClient imports.
+pytest>=8.3.0
+httpx2>=2.0.0
