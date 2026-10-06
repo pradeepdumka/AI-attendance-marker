@@ -194,11 +194,26 @@
           </article>
           <form class="panel editor" id="face-form">
             <h2>Capture a face</h2>
-            <label class="field">
+            <div class="actions source-switch" role="group" aria-label="Photo source">
+              <button class="button" type="button" id="face-source-upload" aria-pressed="true">Upload image</button>
+              <button class="button-quiet" type="button" id="face-source-camera" aria-pressed="false">Webcam</button>
+            </div>
+            <label class="field" id="face-upload">
               <span>Image</span>
-              <input name="image" type="file" accept="image/*">
-              <small id="face-hint">One clear photo. The image is checked and not stored.</small>
+              <input name="image" type="file" accept="image/*" aria-describedby="face-hint">
             </label>
+            <div class="scanner" id="face-camera" hidden>
+              <video id="face-video" playsinline muted></video>
+              <canvas id="face-canvas" hidden></canvas>
+              <img id="face-preview" alt="Captured face" hidden>
+              <p id="face-camera-status">Start the camera, then capture one clear photo.</p>
+              <div class="actions">
+                <button class="button" type="button" id="face-camera-start">Start camera</button>
+                <button class="button" type="button" id="face-camera-snap" hidden>Capture photo</button>
+                <button class="button-quiet" type="button" id="face-camera-retake" hidden>Retake</button>
+              </div>
+            </div>
+            <p class="field-note" id="face-hint">One clear photo. The image is checked and not stored.</p>
             <div class="actions">
               <button class="button" type="submit" id="face-add">Add sample</button>
               <button class="button-quiet" type="button" id="face-replace">Replace samples</button>
@@ -244,7 +259,7 @@
 
         <section id="mark-view" hidden>
           <form class="panel editor" id="camera-form">
-            <h2>Camera frame</h2>
+            <h2>Live face scanner</h2>
             <div class="editor-grid">
               <label class="field">
                 <span>Class</span>
@@ -254,15 +269,17 @@
                 <span>Subject</span>
                 <select name="subject_id"></select>
               </label>
-              <label class="field editor-wide">
-                <span>Frame</span>
-                <input name="image" type="file" accept="image/*">
-                <small>The closest recognized student is marked once for this subject today.</small>
-              </label>
+              <div class="scanner editor-wide" id="scanner">
+                <video id="scanner-video" playsinline muted></video>
+                <canvas id="scanner-canvas" hidden></canvas>
+                <p id="scanner-status">Choose a class and subject, then start scanning.</p>
+              </div>
             </div>
             <div class="actions">
-              <button class="button" type="submit">Mark from frame</button>
+              <button class="button" type="button" id="scanner-start">Start scanner</button>
+              <button class="button-quiet" type="button" id="scanner-stop" disabled>Stop scanner</button>
             </div>
+            <p class="field-note">The webcam scans every few seconds and marks the closest recognized enrolled student once for this subject today.</p>
           </form>
           <form class="panel editor" id="manual-form">
             <h2>Manual mark</h2>

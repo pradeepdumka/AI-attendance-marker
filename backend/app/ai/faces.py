@@ -156,8 +156,11 @@ def capture_image(image_bytes: bytes) -> np.ndarray:
 
 
 def detect_faces(image_rgb: np.ndarray) -> list[FaceBox]:
-    """Find faces with the face_recognition HOG detector."""
-    locations = _face_recognition().face_locations(image_rgb, model="hog")
+    """Find faces with dlib, or OpenCV when dlib is not installed."""
+    try:
+        locations = _face_recognition().face_locations(image_rgb, model="hog")
+    except FaceRecognitionUnavailable:
+        return _opencv_face_boxes(image_rgb)
     return [
         FaceBox(top=int(top), right=int(right), bottom=int(bottom), left=int(left))
         for top, right, bottom, left in locations
@@ -192,14 +195,17 @@ def validate_face_quality(image: np.ndarray, box: FaceBox) -> None:
 
 def encode_face(image_rgb: np.ndarray, box: FaceBox) -> list[float]:
     """Build one compact embedding for a face that already passed validation."""
-    encodings = _face_recognition().face_encodings(
-        image_rgb,
-        known_face_locations=[(box.top, box.right, box.bottom, box.left)],
-        num_jitters=1,
-    )
-    if len(encodings) != 1:
-        raise EmbeddingFailed
-    values = encodings[0]
+    try:
+        encodings = _face_recognition().face_encodings(
+            image_rgb,
+            known_face_locations=[(box.top, box.right, box.bottom, box.left)],
+            num_jitters=1,
+        )
+        if len(encodings) != 1:
+            raise EmbeddingFailed
+        values = encodings[0]
+    except FaceRecognitionUnavailable:
+        values = _opencv_embedding(image_rgb, box)
     if hasattr(values, "tolist"):
         values = values.tolist()
     return compact_embedding(values)
@@ -224,6 +230,45 @@ def _face_recognition():
     except ImportError as exc:
         raise FaceRecognitionUnavailable from exc
     return face_recognition
+
+
+def _opencv_face_boxes(image_rgb: np.ndarray) -> list[FaceBox]:
+    """Detect frontal faces without dlib for local demos and fallback installs."""
+    gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
+    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    detector = cv2.CascadeClassifier(cascade_path)
+    if detector.empty():
+        raise FaceRecognitionUnavailable
+    faces = detector.detectMultiScale(
+        gray,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(MIN_FACE_SIZE, MIN_FACE_SIZE),
+    )
+    return [
+        FaceBox(top=int(y), right=int(x + width), bottom=int(y + height), left=int(x))
+        for x, y, width, height in faces
+    ]
+
+
+def _opencv_embedding(image_rgb: np.ndarray, box: FaceBox) -> list[float]:
+    """Build a simple 128-value descriptor from an aligned grayscale face crop.
+
+    This is a lightweight fallback for machines where dlib cannot be installed.
+    The dlib/face_recognition embedding remains the preferred production path.
+    """
+    crop = _crop(image_rgb, box)
+    if crop.size == 0:
+        raise EmbeddingFailed
+    gray = _gray(crop)
+    normalized = cv2.equalizeHist(gray)
+    resized = cv2.resize(normalized, (16, 8), interpolation=cv2.INTER_AREA).astype(np.float64)
+    vector = resized.reshape(-1) / 255.0
+    vector -= float(vector.mean())
+    norm = float(np.linalg.norm(vector))
+    if norm == 0.0 or not math.isfinite(norm):
+        raise EmbeddingFailed
+    return compact_embedding((vector / norm).tolist())
 
 
 def _limit_resolution(image: np.ndarray) -> np.ndarray:

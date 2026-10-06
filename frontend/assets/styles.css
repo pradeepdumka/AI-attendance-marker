@@ -171,7 +171,8 @@ h3 { margin: 0 0 0.35rem; font-size: 1.45rem; }
 .button:hover { background: var(--teal-deep); color: white; }
 .button-quiet { background: transparent; border-color: var(--line); color: var(--ink); }
 .button-quiet:hover { border-color: var(--ink); color: var(--ink); }
-.button:disabled { opacity: 0.6; cursor: progress; }
+.button:disabled,
+.button-quiet:disabled { opacity: 0.6; cursor: default; }
 
 .roster,
 .panel,
@@ -441,6 +442,31 @@ td.empty { padding: 1.4rem 0.9rem; color: var(--muted); text-align: center; }
 .editor h2 { font-size: 1.55rem; }
 .editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 0.85rem; }
 .editor-wide { grid-column: 1 / -1; }
+.scanner {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+.scanner video,
+.scanner img {
+  width: 100%;
+  max-height: 28rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background:
+    linear-gradient(135deg, rgb(15 95 87 / 10%), rgb(184 92 56 / 8%)),
+    #111820;
+  object-fit: cover;
+  aspect-ratio: 16 / 9;
+}
+.source-switch { margin-bottom: 1rem; }
+#face-hint { display: block; margin: 0 0 1rem; }
+.scanner p,
+.field-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
 .detail { width: min(100%, 42rem); }
 .detail .account div { grid-template-columns: 9.5rem 1fr; }
 .row-actions { white-space: nowrap; }

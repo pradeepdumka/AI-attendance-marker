@@ -129,6 +129,16 @@ let schoolClasses = [];
 let lessonClasses = [];
 let lessonSubjects = [];
 let lessonStudents = [];
+let scannerStream = null;
+let scannerTimer = null;
+let scannerBusy = false;
+const scannerIntervalMs = 2200;
+let faceCameraStream = null;
+let faceCaptureBlob = null;
+let facePreviewUrl = "";
+let faceSource = "upload";
+let faceCameraState = "idle";
+let faceAddLocked = false;
 
 document.addEventListener("DOMContentLoaded", () => {
   if (!sessionStorage.getItem(tokenKey)) {
@@ -170,19 +180,30 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   document.getElementById("face-replace").addEventListener("click", () => saveFace("PUT"));
   document.getElementById("face-cancel").addEventListener("click", () => go("/dashboard/faces"));
+  document.getElementById("face-source-upload").addEventListener("click", () => setFaceSource("upload"));
+  document.getElementById("face-source-camera").addEventListener("click", () => setFaceSource("camera"));
+  document.getElementById("face-camera-start").addEventListener("click", startFaceCamera);
+  document.getElementById("face-camera-snap").addEventListener("click", captureFacePhoto);
+  document.getElementById("face-camera-retake").addEventListener("click", retakeFacePhoto);
   document.getElementById("attendance-form").addEventListener("submit", (event) => event.preventDefault());
   document.getElementById("attendance-form").addEventListener("change", moveAttendance);
   document.getElementById("attendance-prev").addEventListener("click", () => turnAttendance(-1));
   document.getElementById("attendance-next").addEventListener("click", () => turnAttendance(1));
-  document.getElementById("camera-form").addEventListener("submit", saveCameraMark);
+  document.getElementById("camera-form").addEventListener("submit", (event) => event.preventDefault());
+  document.getElementById("scanner-start").addEventListener("click", startScanner);
+  document.getElementById("scanner-stop").addEventListener("click", () => stopScanner("Scanner stopped."));
   document.getElementById("manual-form").addEventListener("submit", saveManualMark);
   document.querySelector("#camera-form select[name=class_id]").addEventListener("change", (event) => {
+    if (scannerStream) stopScanner("Class changed. Start the scanner again.");
     fillSubjectSelect(
       document.querySelector("#camera-form select[name=subject_id]"),
       event.currentTarget.value,
       "",
       "Choose a subject",
     );
+  });
+  document.querySelector("#camera-form select[name=subject_id]").addEventListener("change", () => {
+    if (scannerStream) stopScanner("Subject changed. Start the scanner again.");
   });
   document.querySelector("#manual-form select[name=class_id]").addEventListener("change", (event) => {
     fillSubjectSelect(
@@ -193,6 +214,7 @@ document.addEventListener("DOMContentLoaded", () => {
     );
   });
   window.addEventListener("popstate", showRoute);
+  window.addEventListener("pagehide", stopFaceCamera);
   window.addEventListener("hashchange", () => {
     if (redirectLegacy()) showRoute();
   });
@@ -268,7 +290,10 @@ function go(path) {
 
 function showRoute() {
   const ticket = ++routeTicket;
+  const previous = route.name;
   route = parseRoute();
+  if (previous === "mark" && route.name !== "mark") stopScanner("", { quiet: true });
+  if (previous === "face" && route.name !== "face") resetFaceCapture();
   editing = null;
   pendingDelete = null;
   hideDelete();
@@ -971,6 +996,7 @@ function faceRow({ student, face }) {
 async function loadFace(ticket) {
   const fields = document.getElementById("face-fields");
   fields.replaceChildren();
+  resetFaceCapture();
   document.getElementById("face-form").hidden = true;
   const [studentResult, faceResult] = await Promise.all([
     request(`/admin/students/${route.id}`),
@@ -995,6 +1021,7 @@ async function loadFace(ticket) {
   fields.append(statusWrap);
   const add = document.getElementById("face-add");
   const full = Boolean(face && face.sample_count >= 5);
+  faceAddLocked = full;
   add.disabled = full;
   document.getElementById("face-hint").textContent = full
     ? "This student already has 5 samples. Replace them to store a new image."
@@ -1012,31 +1039,189 @@ function definition(caption, text) {
   return wrap;
 }
 
+function setFaceSource(source) {
+  const next = source === "camera" ? "camera" : "upload";
+  const showCamera = next === "camera";
+  if (!showCamera && faceCameraStream) {
+    stopFaceCamera();
+    if (!faceCaptureBlob) syncFaceCameraControls("idle");
+  }
+  faceSource = next;
+  document.getElementById("face-upload").hidden = showCamera;
+  document.getElementById("face-camera").hidden = !showCamera;
+  const uploadBtn = document.getElementById("face-source-upload");
+  const cameraBtn = document.getElementById("face-source-camera");
+  uploadBtn.className = showCamera ? "button-quiet" : "button";
+  cameraBtn.className = showCamera ? "button" : "button-quiet";
+  uploadBtn.setAttribute("aria-pressed", String(!showCamera));
+  cameraBtn.setAttribute("aria-pressed", String(showCamera));
+  if (showCamera) syncFaceCameraControls(faceCaptureBlob ? "captured" : faceCameraStream ? "live" : "idle");
+}
+
+function resetFaceCapture() {
+  stopFaceCamera();
+  clearFacePreview();
+  faceAddLocked = false;
+  const form = document.getElementById("face-form");
+  if (form?.elements.image) form.elements.image.value = "";
+  setFaceCameraStatus("Start the camera, then capture one clear photo.");
+  syncFaceCameraControls("idle");
+  setFaceSource("upload");
+}
+
+function clearFacePreview() {
+  faceCaptureBlob = null;
+  if (facePreviewUrl) {
+    URL.revokeObjectURL(facePreviewUrl);
+    facePreviewUrl = "";
+  }
+  const preview = document.getElementById("face-preview");
+  if (preview) preview.removeAttribute("src");
+}
+
+async function startFaceCamera() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showMessage("This browser does not support webcam capture.");
+    return;
+  }
+  stopFaceCamera();
+  clearFacePreview();
+  const start = document.getElementById("face-camera-start");
+  if (start) start.disabled = true;
+  try {
+    faceCameraStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 960 }, height: { ideal: 720 } },
+      audio: false,
+    });
+    if (faceSource !== "camera" || route.name !== "face") {
+      stopFaceCamera();
+      return;
+    }
+    const video = document.getElementById("face-video");
+    video.srcObject = faceCameraStream;
+    await video.play();
+    syncFaceCameraControls("live");
+    setFaceCameraStatus("Look at the camera, then capture one clear photo.");
+  } catch (error) {
+    stopFaceCamera();
+    syncFaceCameraControls("idle");
+    showMessage(error?.name === "NotAllowedError" ? "Camera permission was blocked." : "Could not start the camera.");
+  }
+}
+
+function stopFaceCamera() {
+  if (faceCameraStream) {
+    for (const track of faceCameraStream.getTracks()) track.stop();
+    faceCameraStream = null;
+  }
+  const video = document.getElementById("face-video");
+  if (video) video.srcObject = null;
+}
+
+async function captureFacePhoto() {
+  const video = document.getElementById("face-video");
+  if (!video?.videoWidth || !video.videoHeight) {
+    setFaceCameraStatus("Waiting for the camera image...");
+    return;
+  }
+  const canvas = document.getElementById("face-canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+  if (!blob || faceSource !== "camera" || route.name !== "face") return;
+  if (facePreviewUrl) URL.revokeObjectURL(facePreviewUrl);
+  faceCaptureBlob = blob;
+  facePreviewUrl = URL.createObjectURL(blob);
+  document.getElementById("face-preview").src = facePreviewUrl;
+  stopFaceCamera();
+  syncFaceCameraControls("captured");
+  setFaceCameraStatus("Photo captured. Add it as a sample, or retake.");
+}
+
+function retakeFacePhoto() {
+  clearFacePreview();
+  syncFaceCameraControls("idle");
+  startFaceCamera();
+}
+
+function syncFaceCameraControls(state) {
+  faceCameraState = state;
+  const start = document.getElementById("face-camera-start");
+  const snap = document.getElementById("face-camera-snap");
+  const retake = document.getElementById("face-camera-retake");
+  const video = document.getElementById("face-video");
+  const preview = document.getElementById("face-preview");
+  if (!start || !snap || !retake) return;
+  start.hidden = state !== "idle";
+  start.disabled = state !== "idle";
+  snap.hidden = state !== "live";
+  snap.disabled = state !== "live";
+  retake.hidden = state !== "captured";
+  retake.disabled = state !== "captured";
+  if (video) video.hidden = state === "captured";
+  if (preview) preview.hidden = state !== "captured";
+}
+
+function setFaceCameraStatus(text) {
+  const status = document.getElementById("face-camera-status");
+  if (status) status.textContent = text;
+}
+
+function setFaceBusy(busy) {
+  const ids = [
+    "face-add",
+    "face-replace",
+    "face-cancel",
+    "face-source-upload",
+    "face-source-camera",
+    "face-camera-start",
+    "face-camera-snap",
+    "face-camera-retake",
+  ];
+  if (busy) {
+    for (const id of ids) {
+      const button = document.getElementById(id);
+      if (button) button.disabled = true;
+    }
+    return;
+  }
+  document.getElementById("face-add").disabled = faceAddLocked;
+  document.getElementById("face-replace").disabled = false;
+  document.getElementById("face-cancel").disabled = false;
+  document.getElementById("face-source-upload").disabled = false;
+  document.getElementById("face-source-camera").disabled = false;
+  syncFaceCameraControls(faceCameraState);
+}
+
 async function saveFace(method) {
   if (route.name !== "face") return;
   const form = document.getElementById("face-form");
-  const file = form.elements.image.files?.[0];
+  const file = faceSource === "camera"
+    ? (faceCaptureBlob ? new File([faceCaptureBlob], "webcam-face.jpg", { type: "image/jpeg" }) : null)
+    : form.elements.image.files?.[0];
   if (!file) {
-    showMessage("Choose an image.");
+    showMessage(faceSource === "camera" ? "Capture a photo from the webcam." : "Choose an image.");
     return;
   }
   const body = new FormData();
   body.append("image", file);
-  const buttons = [...form.querySelectorAll("button")];
-  buttons.forEach((button) => { button.disabled = true; });
+  setFaceBusy(true);
+  let failed = false;
   try {
     const { response, data } = await requestForm(`/students/${route.id}/face`, body, method);
     if (!response.ok) {
       showMessage(errorText(data));
+      failed = true;
       return;
     }
     sessionStorage.setItem(flashKey, method === "PUT" ? "Face samples replaced." : "Face sample added.");
-    form.elements.image.value = "";
     showRoute();
   } catch {
+    failed = true;
     showMessage("The server could not be reached.");
   } finally {
-    buttons.forEach((button) => { button.disabled = false; });
+    if (failed && route.name === "face") setFaceBusy(false);
   }
 }
 
@@ -1129,6 +1314,7 @@ function attendanceRow(row) {
 }
 
 async function loadMark(ticket) {
+  stopScanner("", { quiet: true });
   await loadLessonCatalogs();
   if (ticket !== routeTicket) return;
   const camera = document.getElementById("camera-form");
@@ -1139,27 +1325,119 @@ async function loadMark(ticket) {
   fillSubjectSelect(manual.elements.subject_id, "", "", "Choose a subject");
   fillStudentSelect(manual.elements.student_id);
   manual.hidden = lessonStudents.length === 0;
+  setScannerStatus("Choose a class and subject, then start scanning.");
 }
 
-async function saveCameraMark(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
+async function startScanner() {
+  const form = document.getElementById("camera-form");
   const classId = value(form, "class_id");
   const subjectId = value(form, "subject_id");
-  const file = form.elements.image.files?.[0];
   if (!classId || !subjectId) {
     showMessage("Choose a class and a subject.");
     return;
   }
-  if (!file) {
-    showMessage("Choose a camera frame.");
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showMessage("This browser does not support webcam scanning.");
     return;
   }
-  const body = new FormData();
-  body.append("class_id", classId);
-  body.append("subject_id", subjectId);
-  body.append("image", file);
-  await submitMark(form, () => requestForm("/attendance/mark", body, "POST"));
+  stopScanner("", { quiet: true });
+  try {
+    scannerStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 960 }, height: { ideal: 720 } },
+      audio: false,
+    });
+    const video = document.getElementById("scanner-video");
+    video.srcObject = scannerStream;
+    await video.play();
+    setScannerControls(true);
+    setScannerStatus("Scanning... keep one enrolled face clearly in the camera.");
+    await scanCurrentFrame();
+    scannerTimer = window.setInterval(scanCurrentFrame, scannerIntervalMs);
+  } catch (error) {
+    stopScanner("", { quiet: true });
+    showMessage(error?.name === "NotAllowedError" ? "Camera permission was blocked." : "Could not start the camera.");
+  }
+}
+
+function stopScanner(message, options = {}) {
+  if (scannerTimer) {
+    window.clearInterval(scannerTimer);
+    scannerTimer = null;
+  }
+  if (scannerStream) {
+    for (const track of scannerStream.getTracks()) track.stop();
+    scannerStream = null;
+  }
+  scannerBusy = false;
+  const video = document.getElementById("scanner-video");
+  if (video) video.srcObject = null;
+  setScannerControls(false);
+  if (!options.quiet && message) setScannerStatus(message);
+}
+
+async function scanCurrentFrame() {
+  if (scannerBusy || !scannerStream) return;
+  const form = document.getElementById("camera-form");
+  const classId = value(form, "class_id");
+  const subjectId = value(form, "subject_id");
+  if (!classId || !subjectId) {
+    stopScanner("Choose a class and subject before scanning.");
+    return;
+  }
+  scannerBusy = true;
+  try {
+    const blob = await captureScannerFrame();
+    if (!blob) {
+      setScannerStatus("Waiting for the camera image...");
+      return;
+    }
+    const body = new FormData();
+    body.append("class_id", classId);
+    body.append("subject_id", subjectId);
+    body.append("image", blob, "webcam-frame.jpg");
+    const { response, data } = await requestForm("/attendance/mark", body, "POST");
+    if (response.ok) {
+      stopScanner("Attendance marked.");
+      sessionStorage.setItem(flashKey, data.created ? "Attendance marked from live camera." : "Already marked today.");
+      go("/dashboard/attendance");
+      return;
+    }
+    if (response.status === 422) {
+      setScannerStatus("No enrolled face matched yet. Keep one face centered and well lit.");
+      return;
+    }
+    const text = errorText(data);
+    stopScanner(text);
+    showMessage(text);
+  } catch {
+    stopScanner("Scanner stopped because the server could not be reached.");
+    showMessage("The server could not be reached.");
+  } finally {
+    scannerBusy = false;
+  }
+}
+
+function captureScannerFrame() {
+  const video = document.getElementById("scanner-video");
+  if (!video.videoWidth || !video.videoHeight) return Promise.resolve(null);
+  const canvas = document.getElementById("scanner-canvas");
+  canvas.width = video.videoWidth;
+  canvas.height = video.videoHeight;
+  canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
+  return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.88));
+}
+
+function setScannerControls(active) {
+  const start = document.getElementById("scanner-start");
+  const stop = document.getElementById("scanner-stop");
+  if (!start || !stop) return;
+  start.disabled = active;
+  stop.disabled = !active;
+}
+
+function setScannerStatus(text) {
+  const status = document.getElementById("scanner-status");
+  if (status) status.textContent = text;
 }
 
 async function saveManualMark(event) {
