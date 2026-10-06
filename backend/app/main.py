@@ -5,7 +5,9 @@ Startup does not open MySQL; the health route checks the database on
 demand. Authentication routes issue and require JWT access tokens.
 Admins manage the student roster at `/admin/students`, teacher
 profiles at `/admin/teachers`, and classes and subjects at
-`/admin/classes` and `/admin/subjects`.
+`/admin/classes` and `/admin/subjects`. Admins and teachers enroll
+faces at `/students/{student_id}/face`. Staff mark attendance from a
+camera frame at `POST /attendance/mark`.
 """
 
 import logging
@@ -21,6 +23,7 @@ from fastapi.staticfiles import StaticFiles
 from app.auth.tokens import AuthConfigurationError
 from app.config import get_settings
 from app.database.connection import dispose_engine
+from app.routers.attendance import router as attendance_router
 from app.routers.academics import (
     assigned_router,
     classes_router,
@@ -28,6 +31,7 @@ from app.routers.academics import (
 )
 from app.routers.admin import router as admin_router
 from app.routers.auth import router as auth_router
+from app.routers.faces import router as faces_router
 from app.routers.health import router as health_router
 from app.routers.pages import ASSETS_DIR
 from app.routers.pages import router as pages_router
@@ -87,6 +91,8 @@ def create_app() -> FastAPI:
     app.include_router(teacher_router)
     app.include_router(assigned_router)
     app.include_router(student_router)
+    app.include_router(faces_router)
+    app.include_router(attendance_router)
     app.include_router(pages_router)
     if ASSETS_DIR.is_dir():
         app.mount("/assets", StaticFiles(directory=ASSETS_DIR), name="assets")

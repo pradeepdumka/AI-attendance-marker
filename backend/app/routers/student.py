@@ -2,7 +2,7 @@
 
 `GET /student/me` identifies the signed-in student account.
 `GET /student/profile` returns that account's roster profile.
-Enrollment history and attendance are a later phase.
+`GET /student/attendance` returns that student's attendance history.
 """
 
 from typing import Annotated

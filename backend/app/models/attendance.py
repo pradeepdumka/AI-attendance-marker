@@ -1,8 +1,10 @@
 """One attendance mark for a student in a subject on a calendar date.
 
-A student has a single row per subject per date. Corrections update that
-row. `marked_by_id` is the user who recorded it and may be null when a
-later recognition job writes the row without a logged-in teacher.
+A student has a single row per subject per date. The unique constraint
+is the database guard against a second check-in. The attendance service
+checks for that row before inserting and does not replace it.
+`teacher_id` is the subject or class teacher for the lesson.
+`marked_by_id` is the user who submitted the frame.
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ if TYPE_CHECKING:
     from app.models.class_model import SchoolClass
     from app.models.student import Student
     from app.models.subject import Subject
+    from app.models.teacher import Teacher
     from app.models.user import User
 
 
@@ -82,6 +85,11 @@ class Attendance(TimestampMixin, Base):
         ForeignKey("subjects.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    teacher_id: Mapped[int | None] = mapped_column(
+        ForeignKey("teachers.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     attendance_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[AttendanceStatus] = mapped_column(
         enum_column(AttendanceStatus, name="attendance_status"),
@@ -107,6 +115,7 @@ class Attendance(TimestampMixin, Base):
     student: Mapped[Student] = relationship(back_populates="attendance_records")
     school_class: Mapped[SchoolClass] = relationship(back_populates="attendance_records")
     subject: Mapped[Subject] = relationship(back_populates="attendance_records")
+    teacher: Mapped[Teacher | None] = relationship(back_populates="attendance_records")
     marked_by: Mapped[User | None] = relationship(back_populates="marked_attendance")
 
     def __repr__(self) -> str:

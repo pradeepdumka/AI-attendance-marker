@@ -2,12 +2,13 @@
 
 Authentication answers who is calling. Authorization answers which role
 that person may use. Route modules depend on `get_current_user`,
-`require_admin`, `require_teacher`, and `require_student`.
+`require_admin`, `require_teacher`, `require_student`, and `require_staff`.
 """
 
 from app.auth.dependencies import (
     get_current_user,
     require_admin,
+    require_staff,
     require_student,
     require_teacher,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "get_current_user",
     "hash_password",
     "require_admin",
+    "require_staff",
     "require_student",
     "require_teacher",
     "verify_password",

@@ -15,6 +15,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.models.base import Base, TimestampMixin
 
 if TYPE_CHECKING:
+    from app.models.attendance import Attendance
     from app.models.class_model import SchoolClass
     from app.models.subject import Subject
     from app.models.user import User
@@ -40,6 +41,7 @@ class Teacher(TimestampMixin, Base):
         back_populates="class_teacher",
     )
     subjects: Mapped[list[Subject]] = relationship(back_populates="teacher")
+    attendance_records: Mapped[list[Attendance]] = relationship(back_populates="teacher")
 
     def __repr__(self) -> str:
         return f"Teacher(id={self.id!r}, employee_code={self.employee_code!r})"

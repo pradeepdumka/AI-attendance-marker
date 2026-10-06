@@ -1,8 +1,10 @@
 """Numeric face embedding for one student.
 
-The column stores the embedding produced by a later recognition phase
-(a list of floats), not an image and not a password. A student may have
-several encodings. Deleting the student deletes those rows.
+Enrollment stores one row per captured sample: a list of 128 floats,
+not the image. `source_image_path` stays empty. A student may have
+several active samples. Deleting the student deletes those rows.
+`app.services.face_recognition` compares a camera frame with the active
+rows. That comparison does not write an attendance record.
 """
 
 from __future__ import annotations

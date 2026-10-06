@@ -4,6 +4,12 @@ Request and response models for the HTTP API live here. These classes
 validate and document JSON. They are not database tables.
 """
 
+from app.schemas.attendance import (
+    AttendanceListResponse,
+    AttendanceMarkResponse,
+    AttendanceResponse,
+    ManualAttendanceRequest,
+)
 from app.schemas.academics import (
     ClassCreateRequest,
     ClassResponse,
@@ -12,6 +18,11 @@ from app.schemas.academics import (
     SubjectCreateRequest,
     SubjectResponse,
     SubjectUpdateRequest,
+)
+from app.schemas.face import (
+    FaceEnrollmentResponse,
+    FaceEnrollmentStatus,
+    FaceSampleResponse,
 )
 from app.schemas.auth import (
     CurrentUserResponse,
@@ -37,13 +48,20 @@ from app.schemas.teacher import (
 )
 
 __all__ = [
+    "AttendanceListResponse",
+    "AttendanceMarkResponse",
+    "AttendanceResponse",
     "ClassCreateRequest",
     "ClassResponse",
     "ClassUpdateRequest",
     "CurrentUserResponse",
     "EnrollmentResponse",
+    "FaceEnrollmentResponse",
+    "FaceEnrollmentStatus",
+    "FaceSampleResponse",
     "HealthResponse",
     "LoginRequest",
+    "ManualAttendanceRequest",
     "RegisterRequest",
     "StudentCreateRequest",
     "StudentListResponse",

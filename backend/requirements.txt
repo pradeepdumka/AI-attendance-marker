@@ -2,10 +2,16 @@
 pwdlib[argon2]>=0.2.1
 PyJWT>=2.10.0
 
-# OpenCV and face recognition are later phases.
+# Face enrollment and recognition. OpenCV reads a frame. face_recognition
+# finds faces and produces embeddings. Matching uses the stored embeddings
+# and does not write attendance.
+numpy>=1.26.0
+opencv-python-headless>=4.10.0
+face-recognition>=1.3.0
 
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
+python-multipart>=0.0.12
 pydantic-settings>=2.6.0
 python-dotenv>=1.0.1
 

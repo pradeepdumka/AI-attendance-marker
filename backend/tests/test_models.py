@@ -98,6 +98,7 @@ def test_user_profiles_are_optional_one_to_one() -> None:
 def test_attendance_is_unique_per_student_subject_and_date() -> None:
     constraint_names = {constraint.name for constraint in Attendance.__table__.constraints}
     assert "uq_attendance_student_subject_date" in constraint_names
+    assert Attendance.__table__.c.teacher_id.nullable is True
     assert list(Attendance.__table__.c.status.type.enums) == [
         status.value for status in AttendanceStatus
     ]
