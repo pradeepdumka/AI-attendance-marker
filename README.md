@@ -64,6 +64,30 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 The site is at [http://127.0.0.1:8000/](http://127.0.0.1:8000/). Sign in is on that same server. An admin creates teacher and student accounts, so the site has no registration page. `/register` redirects to `/login`. After sign-in, the dashboard is at [http://127.0.0.1:8000/dashboard](http://127.0.0.1:8000/dashboard). Interactive API docs are at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
+## Docker
+
+Docker Compose runs MySQL 8.4 and the API. The API image includes the frontend, waits for MySQL, applies Alembic migrations, then starts uvicorn. MySQL data stays in the `mysql_data` volume. MySQL Workbench connects to `127.0.0.1` on `MYSQL_PORT` (3306) with the same user and password as `.env`.
+
+From the repository root:
+
+```bash
+cp .env.example .env
+```
+
+Set `MYSQL_PASSWORD` and `JWT_SECRET` in `.env`. With `MYSQL_USER=root`, that password is also the database root password. Set `MYSQL_ROOT_PASSWORD` only when `MYSQL_USER` is a separate account. `JWT_SECRET` must be at least 32 bytes:
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+Build and start:
+
+```bash
+docker compose up --build -d
+```
+
+The site is at [http://127.0.0.1:8000/](http://127.0.0.1:8000/). `APP_PORT` in `.env` changes the host port. Stop the containers with `docker compose down`. That keeps the database volume. `docker compose down -v` deletes it.
+
 ## Test `/health`
 
 With the server running and MySQL accepting connections:
