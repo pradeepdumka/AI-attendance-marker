@@ -1,13 +1,15 @@
-"""HTML pages for sign-in, registration, and the public home page.
+"""HTML pages for sign-in and the public home page.
 
 The files live in the repository `frontend` directory. API routes stay
 on their own paths, so these pages do not replace `/auth` or `/docs`.
+Teachers and students are added by an admin, so `/register` sends
+visitors to sign-in.
 """
 
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, RedirectResponse
 
 _FRONTEND = Path(__file__).resolve().parents[3] / "frontend"
 ASSETS_DIR = _FRONTEND / "assets"
@@ -17,7 +19,6 @@ router = APIRouter(include_in_schema=False)
 _PAGES = {
     "/": "index.html",
     "/login": "login.html",
-    "/register": "register.html",
     "/account": "account.html",
     "/dashboard": "dashboard.html",
 }
@@ -32,6 +33,12 @@ def _page(filename: str) -> FileResponse:
 
 for _route, _filename in _PAGES.items():
     router.add_api_route(_route, lambda filename=_filename: _page(filename), methods=["GET"])
+
+
+@router.get("/register")
+def register_page() -> RedirectResponse:
+    """Registration is not offered on the site. Sign in with an admin-created account."""
+    return RedirectResponse(url="/login", status_code=307)
 
 
 @router.get("/dashboard/{rest:path}")

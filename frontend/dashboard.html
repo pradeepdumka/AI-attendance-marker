@@ -19,7 +19,63 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.5 12 4l8 7.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"/></svg>
           <span class="label">Dashboard</span>
         </a>
-        <div class="menu-group">
+        <div class="menu-group" data-roles="STUDENT" hidden>
+          <p class="nav-label">My school</p>
+          <a href="/dashboard/profile" data-route="/dashboard/profile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5.5 19.2v-.8C5.5 15.6 8.2 14 12 14s6.5 1.6 6.5 4.4v.8"/></svg>
+            <span class="label">My Profile</span>
+          </a>
+          <a href="/dashboard/attendance" data-route="/dashboard/attendance">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h10v15H7zM9.5 4.5V3.5M14.5 4.5V3.5M8.5 9h7M8.5 12.5h7M8.5 16h4"/></svg>
+            <span class="label">My Attendance</span>
+          </a>
+          <a href="/dashboard/attendance/percentage" data-route="/dashboard/attendance/percentage">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V9M12 19V5M19 19v-7"/></svg>
+            <span class="label">Attendance %</span>
+          </a>
+          <a href="/dashboard/attendance/calendar" data-route="/dashboard/attendance/calendar">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h10v15H7zM9 4V3M15 4V3M7 8.5h10"/></svg>
+            <span class="label">Calendar</span>
+          </a>
+          <a href="/dashboard/subjects" data-route="/dashboard/subjects">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5.5h9.5A2.5 2.5 0 0 1 18 8v11H8.2A2.2 2.2 0 0 0 6 21.2zM9 9h6M9 12.5h6M9 16h3.5"/></svg>
+            <span class="label">Subjects</span>
+          </a>
+        </div>
+        <div class="menu-group" data-roles="TEACHER" hidden>
+          <p class="nav-label">My classes</p>
+          <a href="/dashboard/classes" data-route="/dashboard/classes">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h10.5A2.5 2.5 0 0 1 18 7v12.5H7.5A2.5 2.5 0 0 0 5 22zM8 8.5h7M8 12h7M8 15.5h4"/></svg>
+            <span class="label">My Classes</span>
+          </a>
+          <a href="/dashboard/subjects" data-route="/dashboard/subjects">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5.5h9.5A2.5 2.5 0 0 1 18 8v11H8.2A2.2 2.2 0 0 0 6 21.2zM9 9h6M9 12.5h6M9 16h3.5"/></svg>
+            <span class="label">My Subjects</span>
+          </a>
+        </div>
+        <div class="menu-group" data-roles="TEACHER" hidden>
+          <p class="nav-label">Attendance</p>
+          <a href="/dashboard/attendance" data-route="/dashboard/attendance">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h10v15H7zM9.5 4.5V3.5M14.5 4.5V3.5M8.5 9h7M8.5 12.5h7M8.5 16h4"/></svg>
+            <span class="label">Today</span>
+          </a>
+          <a href="/dashboard/attendance/history" data-route="/dashboard/attendance/history">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><path d="M12 8.5V12l2.5 2"/></svg>
+            <span class="label">History</span>
+          </a>
+          <a href="/dashboard/attendance/mark" data-route="/dashboard/attendance/mark">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            <span class="label">Start attendance</span>
+          </a>
+        </div>
+        <div class="menu-group" data-roles="TEACHER" hidden>
+          <p class="nav-label">Reports</p>
+          <a href="/dashboard/reports" data-route="/dashboard/reports">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V9M12 19V5M19 19v-7"/></svg>
+            <span class="label">Reports</span>
+          </a>
+        </div>
+        <div class="menu-group" data-roles="ADMIN" hidden>
           <p class="nav-label">Teacher management</p>
           <a href="/dashboard/teachers" data-route="/dashboard/teachers">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5.5 19.2v-.8C5.5 15.6 8.2 14 12 14s6.5 1.6 6.5 4.4v.8"/></svg>
@@ -30,7 +86,7 @@
             <span class="label">Add teachers</span>
           </a>
         </div>
-        <div class="menu-group">
+        <div class="menu-group" data-roles="ADMIN" hidden>
           <p class="nav-label">Student management</p>
           <a href="/dashboard/students" data-route="/dashboard/students">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.5" r="2.3"/><circle cx="16" cy="9" r="1.9"/><path d="M3.8 18.4v-.6c0-1.8 2.2-3.2 5.2-3.2s5.2 1.4 5.2 3.2v.6M13.2 14.8c.6-.2 1.4-.3 2.2-.3 2.2 0 4.3.9 4.3 2.6v.8"/></svg>
@@ -41,7 +97,7 @@
             <span class="label">Add new student</span>
           </a>
         </div>
-        <div class="menu-group">
+        <div class="menu-group" data-roles="ADMIN" hidden>
           <p class="nav-label">Class management</p>
           <a href="/dashboard/classes" data-route="/dashboard/classes">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4.5h10.5A2.5 2.5 0 0 1 18 7v12.5H7.5A2.5 2.5 0 0 0 5 22zM8 8.5h7M8 12h7M8 15.5h4"/></svg>
@@ -52,7 +108,7 @@
             <span class="label">Add new class</span>
           </a>
         </div>
-        <div class="menu-group">
+        <div class="menu-group" data-roles="ADMIN" hidden>
           <p class="nav-label">Subject management</p>
           <a href="/dashboard/subjects" data-route="/dashboard/subjects">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5.5h9.5A2.5 2.5 0 0 1 18 8v11H8.2A2.2 2.2 0 0 0 6 21.2zM9 9h6M9 12.5h6M9 16h3.5"/></svg>
@@ -63,14 +119,14 @@
             <span class="label">Add subject</span>
           </a>
         </div>
-        <div class="menu-group">
+        <div class="menu-group" data-roles="ADMIN" hidden>
           <p class="nav-label">Face enrollment</p>
           <a href="/dashboard/faces" data-route="/dashboard/faces">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="3"/><path d="M6.5 18.5v-.4C6.5 16 8.8 14.6 12 14.6s5.5 1.4 5.5 3.5v.4"/></svg>
             <span class="label">Face enrollment</span>
           </a>
         </div>
-        <div class="menu-group">
+        <div class="menu-group" data-roles="ADMIN" hidden>
           <p class="nav-label">Attendance</p>
           <a href="/dashboard/attendance" data-route="/dashboard/attendance">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h10v15H7zM9.5 4.5V3.5M14.5 4.5V3.5M8.5 9h7M8.5 12.5h7M8.5 16h4"/></svg>
@@ -112,19 +168,74 @@
           <ul class="cards" id="stat-cards"></ul>
         </section>
 
+        <section id="profile-view" hidden>
+          <article class="panel detail">
+            <dl class="account" id="profile-fields"></dl>
+          </article>
+        </section>
+
+        <section id="percentage-view" hidden>
+          <p class="lede">Present and late count as attended. Excused marks stay in the totals and are left out of the percentage.</p>
+          <ul class="cards" id="percentage-cards"></ul>
+          <h2>By subject</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Subject</th>
+                  <th scope="col">Code</th>
+                  <th scope="col">Present</th>
+                  <th scope="col">Absent</th>
+                  <th scope="col">Late</th>
+                  <th scope="col">Excused</th>
+                  <th scope="col">Attendance %</th>
+                </tr>
+              </thead>
+              <tbody id="percentage-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="calendar-view" hidden>
+          <p class="lede" id="calendar-summary">Choose a month to see each day you were marked.</p>
+          <form class="toolbar" id="calendar-form">
+            <label class="filter">
+              <span>Month</span>
+              <input name="month" type="month">
+            </label>
+            <label class="filter">
+              <span>Subject</span>
+              <select name="subject_id"><option value="">All</option></select>
+            </label>
+          </form>
+          <ul class="cards" id="calendar-cards"></ul>
+          <ul class="calendar-legend">
+            <li><span class="swatch is-present"></span> Present</li>
+            <li><span class="swatch is-late"></span> Late</li>
+            <li><span class="swatch is-absent"></span> Absent</li>
+            <li><span class="swatch is-excused"></span> Excused</li>
+            <li><span class="swatch is-mixed"></span> Mixed</li>
+          </ul>
+          <div class="calendar" id="calendar-grid"></div>
+        </section>
+
         <section id="list-view" hidden>
           <form class="toolbar" id="list-form">
             <label class="search">
               <span class="visually-hidden">Search</span>
               <input name="search" type="search" placeholder="Search" autocomplete="off">
             </label>
-            <label class="filter">
+            <label class="filter" id="status-filter">
               <span>Status</span>
               <select name="status">
                 <option value="">All</option>
                 <option value="ACTIVE">Active</option>
                 <option value="INACTIVE">Inactive</option>
               </select>
+            </label>
+            <label class="filter" id="class-filter" hidden>
+              <span>Class</span>
+              <select name="class_id"><option value="">All classes</option></select>
             </label>
           </form>
           <p class="list-summary" id="list-summary">Showing 0 – 0 of 0</p>
@@ -148,6 +259,22 @@
               <button class="text-button danger" type="button" id="detail-delete">Delete</button>
             </div>
           </article>
+          <div id="class-students" hidden>
+            <h2>Students</h2>
+            <p class="list-summary" id="student-summary">Showing 0 – 0 of 0</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">Roll number</th>
+                    <th scope="col">Status</th>
+                  </tr>
+                </thead>
+                <tbody id="student-body"></tbody>
+              </table>
+            </div>
+          </div>
         </section>
 
         <section id="form-view" hidden>
@@ -224,7 +351,7 @@
 
         <section id="attendance-view" hidden>
           <form class="toolbar" id="attendance-form">
-            <label class="filter">
+            <label class="filter" id="attendance-class-filter">
               <span>Class</span>
               <select name="class_id"><option value="">All</option></select>
             </label>
@@ -232,11 +359,19 @@
               <span>Subject</span>
               <select name="subject_id"><option value="">All</option></select>
             </label>
+            <label class="filter history-only" hidden>
+              <span>From</span>
+              <input name="date_from" type="date">
+            </label>
+            <label class="filter history-only" hidden>
+              <span>To</span>
+              <input name="date_to" type="date">
+            </label>
           </form>
           <p class="list-summary" id="attendance-summary">Showing 0 – 0 of 0</p>
           <div class="table-wrap">
             <table>
-              <thead>
+              <thead id="attendance-head">
                 <tr>
                   <th scope="col">Student</th>
                   <th scope="col">Roll number</th>
@@ -255,6 +390,30 @@
             <button class="button-quiet" type="button" id="attendance-prev">← Previous</button>
             <button class="button-quiet" type="button" id="attendance-next">Next →</button>
           </div>
+        </section>
+
+        <section id="reports-view" hidden>
+          <p class="lede">Counts and a spreadsheet of attendance in your classes and subjects.</p>
+          <form class="toolbar" id="report-form">
+            <label class="filter">
+              <span>Class</span>
+              <select name="class_id"><option value="">All</option></select>
+            </label>
+            <label class="filter">
+              <span>Subject</span>
+              <select name="subject_id"><option value="">All</option></select>
+            </label>
+            <label class="filter">
+              <span>From</span>
+              <input name="date_from" type="date">
+            </label>
+            <label class="filter">
+              <span>To</span>
+              <input name="date_to" type="date">
+            </label>
+            <button class="button" type="button" id="report-export">Export CSV</button>
+          </form>
+          <ul class="cards" id="report-cards"></ul>
         </section>
 
         <section id="mark-view" hidden>
@@ -319,6 +478,7 @@
     </div>
   </div>
   <button class="scrim" type="button" id="nav-scrim" hidden aria-label="Close menu"></button>
+  <script src="/assets/components.js" defer></script>
   <script src="/assets/app.js" defer></script>
   <script src="/assets/dashboard.js" defer></script>
 </body>

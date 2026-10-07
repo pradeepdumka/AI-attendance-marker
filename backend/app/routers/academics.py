@@ -626,6 +626,40 @@ def read_assigned_class(
 
 
 @assigned_router.get(
+    "/classes/{class_id}/students",
+    response_model=EnrollmentListResponse,
+    responses=_teacher_read_responses(),
+)
+def list_assigned_students(
+    class_id: ClassId,
+    current_user: TeacherUser,
+    db: DbSession,
+    enrollment_status: Annotated[EnrollmentStatus | None, Query(alias="status")] = EnrollmentStatus.ACTIVE,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> EnrollmentListResponse:
+    """List students in one active class assigned to this teacher."""
+    teacher = _require_profile(db, current_user.id)
+    try:
+        get_class_for_teacher(db, class_id, teacher.id)
+        rows, total = list_class_students(
+            db,
+            class_id=class_id,
+            status=enrollment_status,
+            page=page,
+            page_size=page_size,
+        )
+    except AcademicServiceError as exc:
+        _reject(exc)
+    return EnrollmentListResponse(
+        items=[to_enrollment_response(row) for row in rows],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@assigned_router.get(
     "/subjects",
     response_model=SubjectListResponse,
     responses=_teacher_read_responses(),

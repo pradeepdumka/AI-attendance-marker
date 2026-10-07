@@ -48,6 +48,7 @@ def test_expected_tables_are_registered() -> None:
         "enrollments",
         "face_encodings",
         "attendance_records",
+        "attendance_sessions",
         "audit_logs",
     }
 

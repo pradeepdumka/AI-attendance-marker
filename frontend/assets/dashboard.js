@@ -108,7 +108,57 @@ const lists = {
   },
 };
 
-const views = {
+const teacherLists = {
+  classes: {
+    title: "My Classes",
+    noun: "class",
+    path: "/teacher/classes",
+    idKey: "class_id",
+    columns: [
+      linkColumn("Class", (row) => row.name),
+      textColumn("Section", (row) => row.section),
+      textColumn("Year", (row) => row.academic_year),
+    ],
+    fields: [
+      field("name", "Class name"),
+      field("section", "Section"),
+      field("academic_year", "Academic year"),
+    ],
+  },
+  subjects: {
+    title: "My Subjects",
+    noun: "subject",
+    path: "/teacher/subjects",
+    idKey: "subject_id",
+    columns: [
+      linkColumn("Subject", (row) => row.name),
+      textColumn("Code", (row) => row.code),
+      textColumn("Class", (row) => className(row.class_id)),
+    ],
+    fields: [
+      field("name", "Subject"),
+      field("code", "Code"),
+      field("class_id", "Class"),
+    ],
+  },
+};
+
+const studentLists = {
+  subjects: {
+    title: "Subjects",
+    noun: "subject",
+    path: "/student/subjects",
+    idKey: "subject_id",
+    columns: [
+      textColumn("Subject", (row) => row.name),
+      textColumn("Code", (row) => row.code),
+      textColumn("Class", (row) => className(row.class_id)),
+    ],
+    fields: [],
+  },
+};
+
+const viewFor = {
   home: "home-view",
   list: "list-view",
   detail: "detail-view",
@@ -116,7 +166,12 @@ const views = {
   faces: "face-list-view",
   face: "face-form-view",
   attendance: "attendance-view",
+  history: "attendance-view",
   mark: "mark-view",
+  reports: "reports-view",
+  profile: "profile-view",
+  percentage: "percentage-view",
+  calendar: "calendar-view",
 };
 
 let routeTicket = 0;
@@ -139,6 +194,7 @@ let facePreviewUrl = "";
 let faceSource = "upload";
 let faceCameraState = "idle";
 let faceAddLocked = false;
+let openSessionId = null;
 
 document.addEventListener("DOMContentLoaded", () => {
   if (!sessionStorage.getItem(tokenKey)) {
@@ -160,7 +216,9 @@ document.addEventListener("DOMContentLoaded", () => {
     event.preventDefault();
     moveList({ page: 1 });
   });
-  document.querySelector("#list-form select").addEventListener("change", () => moveList({ page: 1 }));
+  document.getElementById("list-form").addEventListener("change", (event) => {
+    if (event.target.matches("select")) moveList({ page: 1 });
+  });
   document.getElementById("page-prev").addEventListener("click", () => turn(-1));
   document.getElementById("page-next").addEventListener("click", () => turn(1));
   document.getElementById("editor").addEventListener("submit", saveEditor);
@@ -212,16 +270,81 @@ document.addEventListener("DOMContentLoaded", () => {
       "",
       "Choose a subject",
     );
+    fillStudentSelect(
+      document.querySelector("#manual-form select[name=student_id]"),
+      event.currentTarget.value,
+    );
   });
+  document.getElementById("report-form").addEventListener("change", moveReport);
+  document.getElementById("report-form").addEventListener("submit", (event) => event.preventDefault());
+  document.getElementById("report-export").addEventListener("click", exportReport);
+  document.getElementById("calendar-form").addEventListener("submit", (event) => event.preventDefault());
+  document.getElementById("calendar-form").addEventListener("change", moveCalendar);
   window.addEventListener("popstate", showRoute);
-  window.addEventListener("pagehide", stopFaceCamera);
+  window.addEventListener("pagehide", () => {
+    stopFaceCamera();
+    stopScanner("", { quiet: true });
+  });
   window.addEventListener("hashchange", () => {
     if (redirectLegacy()) showRoute();
   });
   redirectLegacy();
-  loadUser();
-  showRoute();
+  boot();
 });
+
+async function boot() {
+  const user = await loadUser();
+  if (!user) {
+    if (sessionStorage.getItem(tokenKey)) showMessage("The server could not be reached.");
+    return;
+  }
+  applyRole(user.role);
+  showRoute();
+}
+
+function applyRole(role) {
+  document.querySelectorAll("[data-roles]").forEach((node) => {
+    node.hidden = !node.dataset.roles.split(/\s+/).includes(role);
+  });
+}
+
+function accessBlock(next) {
+  if (!signedIn) return null;
+  if (signedIn.role === "STUDENT") return studentAllowed(next) ? null : "student";
+  if (signedIn.role === "TEACHER" && !teacherAllowed(next)) {
+    return studentRoute(next) ? "student-only" : "teacher";
+  }
+  if (signedIn.role === "ADMIN" && studentRoute(next)) return "student-only";
+  if (signedIn.role === "ADMIN" && (next.name === "history" || next.name === "reports")) return "admin";
+  return null;
+}
+
+function studentAllowed(next) {
+  if (next.name === "home" || next.name === "missing") return true;
+  if (next.name === "profile" || next.name === "attendance" || next.name === "percentage" || next.name === "calendar") {
+    return true;
+  }
+  return next.name === "list" && next.resource === "subjects";
+}
+
+function studentRoute(next) {
+  return next.name === "profile" || next.name === "percentage" || next.name === "calendar";
+}
+
+function teacherAllowed(next) {
+  if (next.name === "home" || next.name === "missing") return true;
+  if (next.name === "attendance" || next.name === "history" || next.name === "mark" || next.name === "reports") return true;
+  if ((next.name === "list" || next.name === "detail") && (next.resource === "classes" || next.resource === "subjects")) {
+    return true;
+  }
+  return false;
+}
+
+function catalog() {
+  if (signedIn?.role === "STUDENT" && studentLists[route.resource]) return studentLists[route.resource];
+  if (signedIn?.role === "TEACHER" && teacherLists[route.resource]) return teacherLists[route.resource];
+  return lists[route.resource];
+}
 
 function setMenu(collapsed) {
   document.body.classList.toggle("nav-collapsed", collapsed);
@@ -266,11 +389,16 @@ function parseRoute() {
     if (parts.length === 3 && /^\d+$/.test(parts[2])) return { name: "face", resource, id: parts[2] };
     return { name: "missing" };
   }
+  if (resource === "profile" && parts.length === 2) return { name: "profile", resource };
   if (resource === "attendance") {
     if (parts.length === 2) return { name: "attendance", resource };
     if (parts.length === 3 && parts[2] === "mark") return { name: "mark", resource };
+    if (parts.length === 3 && parts[2] === "history") return { name: "history", resource };
+    if (parts.length === 3 && parts[2] === "percentage") return { name: "percentage", resource };
+    if (parts.length === 3 && parts[2] === "calendar") return { name: "calendar", resource };
     return { name: "missing" };
   }
+  if (resource === "reports" && parts.length === 2) return { name: "reports", resource };
   if (!lists[resource]) return { name: "missing" };
   if (parts.length === 2) return { name: "list", resource };
   if (parts.length === 3 && parts[2] === "new") return { name: "form", resource };
@@ -292,6 +420,17 @@ function showRoute() {
   const ticket = ++routeTicket;
   const previous = route.name;
   route = parseRoute();
+  const block = accessBlock(route);
+  if (block) {
+    sessionStorage.setItem(flashKey, {
+      student: "That page is not available for your account.",
+      teacher: "That page is for an admin.",
+      admin: "That page is for a teacher.",
+      "student-only": "That page is for a student.",
+    }[block]);
+    history.replaceState(null, "", "/dashboard");
+    route = parseRoute();
+  }
   if (previous === "mark" && route.name !== "mark") stopScanner("", { quiet: true });
   if (previous === "face" && route.name !== "face") resetFaceCapture();
   editing = null;
@@ -300,9 +439,11 @@ function showRoute() {
   showMessage("");
   markCurrent();
   setHeading(pageTitle());
-  for (const [name, id] of Object.entries(views)) {
-    document.getElementById(id).hidden = name !== route.name;
+  const activeId = viewFor[route.name];
+  for (const id of new Set(Object.values(viewFor))) {
+    document.getElementById(id).hidden = id !== activeId;
   }
+  document.getElementById("class-students").hidden = true;
   const editor = document.getElementById("editor");
   if (editor) editor.hidden = route.name !== "form";
   if (route.name === "home") loadHome(ticket);
@@ -311,8 +452,12 @@ function showRoute() {
   else if (route.name === "form") loadForm(ticket);
   else if (route.name === "faces") loadFaces(ticket);
   else if (route.name === "face") loadFace(ticket);
-  else if (route.name === "attendance") loadAttendance(ticket);
+  else if (route.name === "attendance" || route.name === "history") loadAttendance(ticket);
   else if (route.name === "mark") loadMark(ticket);
+  else if (route.name === "reports") loadReports(ticket);
+  else if (route.name === "profile") loadProfile(ticket);
+  else if (route.name === "percentage") loadPercentage(ticket);
+  else if (route.name === "calendar") loadCalendar(ticket);
   else showMessage("That page was not found.");
   revealFlash(ticket);
 }
@@ -328,11 +473,16 @@ function revealFlash(ticket) {
 
 function pageTitle() {
   if (route.name === "home" || route.name === "missing") return "Dashboard";
+  if (route.name === "profile") return "My Profile";
   if (route.name === "faces") return "Face enrollment";
   if (route.name === "face") return "Enroll face";
-  if (route.name === "attendance") return "Attendance";
-  if (route.name === "mark") return "Mark attendance";
-  const list = lists[route.resource];
+  if (route.name === "attendance") return signedIn?.role === "STUDENT" ? "My Attendance" : signedIn?.role === "TEACHER" ? "Today" : "Attendance";
+  if (route.name === "history") return "Attendance history";
+  if (route.name === "percentage") return "Attendance %";
+  if (route.name === "calendar") return "Calendar";
+  if (route.name === "mark") return signedIn?.role === "TEACHER" ? "Start attendance" : "Mark attendance";
+  if (route.name === "reports") return "Reports";
+  const list = catalog();
   if (route.name === "list") return list.title;
   if (route.name === "detail") return "Details";
   return route.id ? `Edit ${list.noun}` : list.addTitle;
@@ -348,13 +498,23 @@ function markCurrent() {
     ? `/dashboard/${route.resource}/new`
     : route.name === "mark"
       ? "/dashboard/attendance/mark"
-      : route.name === "faces" || route.name === "face"
-        ? "/dashboard/faces"
-        : route.name === "attendance"
-          ? "/dashboard/attendance"
-          : route.resource
-            ? `/dashboard/${route.resource}`
-            : "/dashboard";
+      : route.name === "history"
+        ? "/dashboard/attendance/history"
+        : route.name === "percentage"
+          ? "/dashboard/attendance/percentage"
+          : route.name === "calendar"
+            ? "/dashboard/attendance/calendar"
+            : route.name === "profile"
+              ? "/dashboard/profile"
+              : route.name === "reports"
+          ? "/dashboard/reports"
+          : route.name === "faces" || route.name === "face"
+            ? "/dashboard/faces"
+            : route.name === "attendance"
+              ? "/dashboard/attendance"
+              : route.resource
+                ? `/dashboard/${route.resource}`
+                : "/dashboard";
   document.querySelectorAll(".sidebar a[data-route]").forEach((link) => {
     if (link.dataset.route === current) link.setAttribute("aria-current", "page");
     else link.removeAttribute("aria-current");
@@ -366,26 +526,42 @@ async function loadUser() {
   if (response.status === 401) {
     sessionStorage.removeItem(tokenKey);
     window.location.replace("/login");
-    return;
+    return null;
   }
-  if (!response.ok) return;
+  if (!response.ok) return null;
   signedIn = data;
   document.getElementById("user-name").textContent = `${data.first_name} ${data.last_name}`;
   document.getElementById("user-role").textContent = label(data.role);
   document.getElementById("user-initials").textContent = initials(data.first_name, data.last_name);
-  if (route.name === "home") paintHello(document.getElementById("dashboard-hello").dataset.blocked === "1");
+  return data;
 }
 
 function paintHello(blocked) {
   const hello = document.getElementById("dashboard-hello");
   hello.dataset.blocked = blocked ? "1" : "0";
   const welcome = signedIn ? `Welcome back, ${signedIn.first_name}.` : "Welcome back.";
+  if (signedIn?.role === "TEACHER") {
+    hello.textContent = `${welcome} These are your classes, subjects, and attendance.`;
+    return;
+  }
+  if (signedIn?.role === "STUDENT") {
+    hello.textContent = `${welcome} This is your profile, class, subjects, and attendance.`;
+    return;
+  }
   hello.textContent = blocked
     ? `${welcome} Teacher, student, class, and subject lists are open to an admin.`
     : welcome;
 }
 
 async function loadHome(ticket) {
+  if (signedIn?.role === "TEACHER") {
+    await loadTeacherHome(ticket);
+    return;
+  }
+  if (signedIn?.role === "STUDENT") {
+    await loadStudentHome(ticket);
+    return;
+  }
   const cards = document.getElementById("stat-cards");
   cards.replaceChildren();
   const [entries, attendance] = await Promise.all([
@@ -399,23 +575,58 @@ async function loadHome(ticket) {
   ]);
   if (ticket !== routeTicket) return;
   paintHello(entries.some((entry) => entry[3] === 403));
-  for (const [key, title, total] of entries) addStatCard(cards, key, title, total);
-  addStatCard(cards, "faces", "Face enrollment", null);
-  addStatCard(cards, "attendance", "Attendance", attendance.response.ok ? attendance.data.total : null);
+  for (const [key, title, total] of entries) addStatCard(cards, `/dashboard/${key}`, title, total);
+  addStatCard(cards, "/dashboard/faces", "Face enrollment", null);
+  addStatCard(cards, "/dashboard/attendance", "Attendance", attendance.response.ok ? attendance.data.total : null);
 }
 
-function addStatCard(cards, key, title, total) {
-  const item = document.createElement("li");
-  const heading = document.createElement("h3");
-  const link = document.createElement("a");
-  link.href = `/dashboard/${key}`;
-  link.textContent = title;
-  heading.append(link);
-  const count = document.createElement("p");
-  count.className = "stat";
-  count.textContent = total === null ? "—" : String(total);
-  item.append(heading, count);
-  cards.append(item);
+async function loadTeacherHome(ticket) {
+  const cards = document.getElementById("stat-cards");
+  cards.replaceChildren();
+  const [classes, subjects, today, stats] = await Promise.all([
+    request("/teacher/classes?page=1&page_size=1"),
+    request("/teacher/subjects?page=1&page_size=1"),
+    request("/teacher/attendance/today?page=1&page_size=1"),
+    request("/teacher/attendance/statistics"),
+  ]);
+  if (ticket !== routeTicket) return;
+  paintHello(false);
+  addStatCard(cards, "/dashboard/classes", "My classes", classes.response.ok ? classes.data.total : null);
+  addStatCard(cards, "/dashboard/subjects", "My subjects", subjects.response.ok ? subjects.data.total : null);
+  addStatCard(cards, "/dashboard/attendance", "Today", today.response.ok ? today.data.total : null);
+  addStatCard(cards, "/dashboard/reports", "Reports", stats.response.ok ? stats.data.total : null);
+}
+
+async function loadStudentHome(ticket) {
+  const cards = document.getElementById("stat-cards");
+  cards.replaceChildren();
+  const now = new Date();
+  const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const [profile, schoolClass, subjects, percentage, month] = await Promise.all([
+    request("/student/profile"),
+    request("/student/class"),
+    request("/student/subjects?page=1&page_size=1"),
+    request("/student/attendance/percentage"),
+    request(`/student/attendance/monthly?year=${now.getFullYear()}&month=${now.getMonth() + 1}`),
+  ]);
+  if (ticket !== routeTicket) return;
+  const hello = document.getElementById("dashboard-hello");
+  const welcome = signedIn ? `Welcome back, ${signedIn.first_name}.` : "Welcome back.";
+  let detail = "This is your profile, class, subjects, and attendance.";
+  if (profile.response.status === 404) detail = "Your roster profile is not ready yet.";
+  else if (schoolClass.response.ok) detail = `You are in ${classLabel(schoolClass.data)}.`;
+  else if (schoolClass.response.status === 404) detail = "You are not enrolled in a class yet.";
+  hello.dataset.blocked = "0";
+  hello.textContent = `${welcome} ${detail}`;
+  addStatCard(cards, "/dashboard/profile", "My Profile", profile.response.ok ? profile.data.roll_number : null);
+  addStatCard(cards, "/dashboard/attendance", "My Attendance", percentage.response.ok ? percentage.data.total : null);
+  addStatCard(cards, "/dashboard/attendance/percentage", "Attendance %", percentage.response.ok ? percentText(percentage.data.percentage) : null);
+  addStatCard(cards, `/dashboard/attendance/calendar?month=${monthKey}`, "Calendar", month.response.ok ? percentText(month.data.percentage) : null);
+  addStatCard(cards, "/dashboard/subjects", "Subjects", subjects.response.ok ? subjects.data.total : null);
+}
+
+function addStatCard(cards, href, title, total) {
+  cards.append(Dashboard.statCard(title, total, href));
 }
 
 function listQuery() {
@@ -424,6 +635,7 @@ function listQuery() {
     page: Math.max(1, Number(params.get("page")) || 1),
     search: params.get("search") || "",
     status: params.get("status") || "",
+    classId: params.get("class_id") || "",
   };
 }
 
@@ -431,7 +643,10 @@ function listPath(resource, state) {
   const params = new URLSearchParams();
   if (state.page > 1) params.set("page", String(state.page));
   if (state.search) params.set("search", state.search);
-  if (state.status) params.set("status", state.status);
+  if (state.status && signedIn?.role !== "TEACHER") params.set("status", state.status);
+  if (signedIn?.role === "TEACHER" && resource === "subjects" && state.classId) {
+    params.set("class_id", state.classId);
+  }
   const query = params.toString();
   return `/dashboard/${resource}${query ? `?${query}` : ""}`;
 }
@@ -443,7 +658,8 @@ function moveList(patch) {
   go(listPath(route.resource, {
     page: patch.page ?? state.page,
     search: value(form, "search"),
-    status: value(form, "status"),
+    status: signedIn?.role === "TEACHER" ? "" : value(form, "status"),
+    classId: form.elements.class_id ? value(form, "class_id") : "",
   }));
 }
 
@@ -454,39 +670,60 @@ function turn(step) {
 }
 
 async function loadList(ticket) {
-  const list = lists[route.resource];
+  const list = catalog();
   const state = listQuery();
   const form = document.getElementById("list-form");
+  const teacher = signedIn?.role === "TEACHER";
+  const student = signedIn?.role === "STUDENT";
+  const readOnlyList = teacher || student;
+  const teacherSubjects = teacher && route.resource === "subjects";
   form.elements.search.value = state.search;
-  form.elements.status.value = state.status;
+  form.elements.status.value = readOnlyList ? "" : state.status;
+  document.getElementById("status-filter").hidden = readOnlyList;
+  document.getElementById("class-filter").hidden = !teacherSubjects;
+  if (teacherSubjects) {
+    schoolClasses = await pagedCatalog("/teacher/classes", "");
+    lessonClasses = schoolClasses;
+    if (ticket !== routeTicket) return;
+    fillClassSelect(form.elements.class_id, state.classId, "All classes");
+  }
   const params = new URLSearchParams({ page: String(state.page), page_size: String(pageSize) });
   if (state.search) params.set("search", state.search);
-  if (state.status) params.set("status", state.status);
+  if (!readOnlyList && state.status) params.set("status", state.status);
+  if (teacherSubjects && state.classId) params.set("class_id", state.classId);
   renderHead(list.columns);
   const body = document.getElementById("list-body");
   body.replaceChildren(messageRow(list.columns.length, "Loading…"));
-  const { response, data } = await request(`${list.path}?${params}`);
+  const listRequest = request(`${list.path}?${params}`);
+  const classRequest = student ? request("/student/class") : Promise.resolve(null);
+  const [{ response, data }, enrolled] = await Promise.all([listRequest, classRequest]);
   if (ticket !== routeTicket) return;
   if (!response.ok) {
     body.replaceChildren(messageRow(list.columns.length, "No data to display"));
     document.getElementById("list-summary").textContent = "Showing 0 – 0 of 0";
     setPager(state.page, 0);
-    showMessage(response.status === 403 ? "Admin access is required for this list." : errorText(data));
+    showMessage(response.status === 403
+      ? (student ? "You cannot open this list." : "Admin access is required for this list.")
+      : errorText(data));
     return;
   }
+  if (student) schoolClasses = enrolled?.response?.ok ? [enrolled.data] : [];
   await prepareSources(list);
   if (ticket !== routeTicket) return;
   renderRows(list.columns, data.items);
   const total = data.total || 0;
-  const start = total === 0 ? 0 : (state.page - 1) * pageSize + 1;
-  const end = Math.min(state.page * pageSize, total);
-  document.getElementById("list-summary").textContent = `Showing ${start} – ${end} of ${total}`;
+  document.getElementById("list-summary").textContent = Dashboard.summary(state.page, pageSize, total);
   setPager(state.page, total);
 }
 
 function setPager(page, total) {
-  document.getElementById("page-prev").disabled = page <= 1;
-  document.getElementById("page-next").disabled = page * pageSize >= total;
+  Dashboard.setPager(
+    document.getElementById("page-prev"),
+    document.getElementById("page-next"),
+    page,
+    pageSize,
+    total,
+  );
 }
 
 function renderHead(columns) {
@@ -501,26 +738,11 @@ function renderHead(columns) {
 }
 
 function renderRows(columns, items) {
-  const body = document.getElementById("list-body");
-  if (!items.length) {
-    body.replaceChildren(messageRow(columns.length, "No data to display"));
-    return;
-  }
-  body.replaceChildren(...items.map((item) => {
-    const row = document.createElement("tr");
-    row.append(...columns.map((column) => column.cell(item)));
-    return row;
-  }));
+  Dashboard.renderRows(document.getElementById("list-body"), columns, items, "No data to display");
 }
 
 function messageRow(span, text) {
-  const row = document.createElement("tr");
-  const cell = document.createElement("td");
-  cell.colSpan = span;
-  cell.className = "empty";
-  cell.textContent = text;
-  row.append(cell);
-  return row;
+  return Dashboard.messageRow(span, text);
 }
 
 function linkColumn(label, read) {
@@ -583,21 +805,7 @@ function statusCell(status) {
 }
 
 function statusPill(status) {
-  const names = {
-    ACTIVE: ["Active", "pill-present"],
-    INACTIVE: ["Inactive", "pill-absent"],
-    PRESENT: ["Present", "pill-present"],
-    ABSENT: ["Absent", "pill-absent"],
-    LATE: ["Late", "pill-late"],
-    EXCUSED: ["Excused", "pill-late"],
-    ENROLLED: ["Enrolled", "pill-present"],
-    NOT_ENROLLED: ["Not enrolled", "pill-absent"],
-  };
-  const [text, tone] = names[status] || [label(status) || "—", "pill-absent"];
-  const pill = document.createElement("span");
-  pill.className = `pill ${tone}`;
-  pill.textContent = text;
-  return pill;
+  return Dashboard.statusPill(status);
 }
 
 function initials(first, last) {
@@ -605,8 +813,7 @@ function initials(first, last) {
 }
 
 function label(role) {
-  const text = String(role || "").toLowerCase();
-  return text ? text[0].toUpperCase() + text.slice(1) : "";
+  return Dashboard.label(role);
 }
 
 function field(name, labelText, options = {}) {
@@ -614,8 +821,9 @@ function field(name, labelText, options = {}) {
 }
 
 async function loadDetail(ticket) {
-  const list = lists[route.resource];
+  const list = catalog();
   document.getElementById("detail-fields").replaceChildren();
+  document.getElementById("class-students").hidden = true;
   document.querySelector("#detail-view .actions").hidden = true;
   const { response, data } = await request(`${list.path}/${route.id}`);
   if (ticket !== routeTicket) return;
@@ -626,7 +834,38 @@ async function loadDetail(ticket) {
   await prepareSources(list);
   if (ticket !== routeTicket) return;
   pendingDelete = data;
+  if (signedIn?.role === "TEACHER") {
+    schoolClasses = await pagedCatalog("/teacher/classes", "");
+    if (ticket !== routeTicket) return;
+  }
   renderDetail(list, data);
+  if (signedIn?.role === "TEACHER" && route.resource === "classes") {
+    await loadClassStudents(ticket, data.class_id);
+  }
+}
+
+async function loadClassStudents(ticket, classId) {
+  const body = document.getElementById("student-body");
+  body.replaceChildren(messageRow(3, "Loading…"));
+  const { response, data } = await request(
+    `/teacher/classes/${classId}/students?status=ACTIVE&page=1&page_size=100`,
+  );
+  if (ticket !== routeTicket) return;
+  const panel = document.getElementById("class-students");
+  panel.hidden = false;
+  if (!response.ok) {
+    body.replaceChildren(messageRow(3, "No data to display"));
+    document.getElementById("student-summary").textContent = "Showing 0 – 0 of 0";
+    showMessage(errorText(data));
+    return;
+  }
+  const columns = [
+    textColumn("Name", (row) => `${row.first_name} ${row.last_name}`),
+    textColumn("Roll number", (row) => row.roll_number),
+    { label: "Status", cell: (row) => statusCell(row.status) },
+  ];
+  Dashboard.renderRows(body, columns, data.items || [], "No students in this class");
+  document.getElementById("student-summary").textContent = Dashboard.summary(1, 100, data.total || 0);
 }
 
 function renderDetail(list, row) {
@@ -641,7 +880,22 @@ function renderDetail(list, row) {
     return wrap;
   });
   document.getElementById("detail-fields").replaceChildren(...blocks);
-  document.getElementById("detail-edit").href = `/dashboard/${route.resource}/${row[list.idKey]}/edit`;
+  const edit = document.getElementById("detail-edit");
+  const remove = document.getElementById("detail-delete");
+  if (signedIn?.role === "TEACHER") {
+    remove.hidden = true;
+    if (route.resource === "classes") {
+      edit.textContent = "My subjects";
+      edit.href = `/dashboard/subjects?class_id=${row.class_id}`;
+    } else {
+      edit.textContent = "Start attendance";
+      edit.href = `/dashboard/attendance/mark?class_id=${row.class_id}&subject_id=${row.subject_id}`;
+    }
+  } else {
+    remove.hidden = false;
+    edit.textContent = "Edit";
+    edit.href = `/dashboard/${route.resource}/${row[list.idKey]}/edit`;
+  }
   document.querySelector("#detail-view .actions").hidden = false;
   setHeading(recordTitle(row));
 }
@@ -650,7 +904,7 @@ function shown(item, row) {
   const raw = row[item.name];
   if (raw == null || raw === "") return "—";
   if (item.source === "teachers") return teacherName(raw) || "—";
-  if (item.source === "classes") return className(raw) || "—";
+  if (item.source === "classes" || item.name === "class_id") return className(raw) || "—";
   const match = item.options?.find(([optionValue]) => optionValue === raw);
   return match ? match[1] : String(raw);
 }
@@ -1231,64 +1485,110 @@ function attendanceQuery() {
     page: Math.max(1, Number(params.get("page")) || 1),
     classId: params.get("class_id") || "",
     subjectId: params.get("subject_id") || "",
+    dateFrom: params.get("date_from") || "",
+    dateTo: params.get("date_to") || "",
   };
 }
 
 function attendancePath(state) {
+  const student = signedIn?.role === "STUDENT";
+  const showDates = student || route.name === "history";
   const params = new URLSearchParams();
   if (state.page > 1) params.set("page", String(state.page));
-  if (state.classId) params.set("class_id", state.classId);
+  if (!student && state.classId) params.set("class_id", state.classId);
   if (state.subjectId) params.set("subject_id", state.subjectId);
+  if (showDates && state.dateFrom) params.set("date_from", state.dateFrom);
+  if (showDates && state.dateTo) params.set("date_to", state.dateTo);
   const query = params.toString();
-  return `/dashboard/attendance${query ? `?${query}` : ""}`;
+  const base = route.name === "history" ? "/dashboard/attendance/history" : "/dashboard/attendance";
+  return `${base}${query ? `?${query}` : ""}`;
 }
 
 function moveAttendance() {
-  if (route.name !== "attendance") return;
+  if (route.name !== "attendance" && route.name !== "history") return;
   const form = document.getElementById("attendance-form");
-  const classId = value(form, "class_id");
+  const student = signedIn?.role === "STUDENT";
+  const classId = student ? "" : value(form, "class_id");
   let subjectId = value(form, "subject_id");
   if (subjectId && !subjectChoices(classId).some(([id]) => id === subjectId)) subjectId = "";
-  go(attendancePath({ page: 1, classId, subjectId }));
+  go(attendancePath({
+    page: 1,
+    classId,
+    subjectId,
+    dateFrom: value(form, "date_from"),
+    dateTo: value(form, "date_to"),
+  }));
 }
 
 function turnAttendance(step) {
-  if (route.name !== "attendance") return;
+  if (route.name !== "attendance" && route.name !== "history") return;
   const state = attendanceQuery();
   go(attendancePath({ ...state, page: Math.max(1, state.page + step) }));
 }
 
 async function loadAttendance(ticket) {
   const state = attendanceQuery();
+  const student = signedIn?.role === "STUDENT";
+  const columns = student ? 5 : 8;
   const body = document.getElementById("attendance-body");
-  body.replaceChildren(messageRow(8, "Loading…"));
+  setAttendanceHead(student);
+  body.replaceChildren(messageRow(columns, "Loading…"));
+  const showDates = student || route.name === "history";
+  document.querySelectorAll(".history-only").forEach((node) => {
+    node.hidden = !showDates;
+  });
+  document.getElementById("attendance-class-filter").hidden = student;
   await loadLessonCatalogs();
   if (ticket !== routeTicket) return;
   const form = document.getElementById("attendance-form");
-  fillClassSelect(form.elements.class_id, state.classId, "All");
-  fillSubjectSelect(form.elements.subject_id, state.classId, state.subjectId, "All");
+  fillClassSelect(form.elements.class_id, student ? "" : state.classId, "All");
+  fillSubjectSelect(form.elements.subject_id, student ? "" : state.classId, state.subjectId, "All");
+  form.elements.date_from.value = state.dateFrom;
+  form.elements.date_to.value = state.dateTo;
   const params = new URLSearchParams({ page: String(state.page), page_size: String(pageSize) });
-  if (state.classId) params.set("class_id", state.classId);
+  if (!student && state.classId) params.set("class_id", state.classId);
   if (state.subjectId) params.set("subject_id", state.subjectId);
-  const { response, data } = await request(`/attendance/today?${params}`);
+  if (showDates && state.dateFrom) params.set("date_from", state.dateFrom);
+  if (showDates && state.dateTo) params.set("date_to", state.dateTo);
+  const endpoint = student
+    ? "/student/attendance"
+    : route.name === "history"
+      ? "/teacher/attendance"
+      : signedIn?.role === "TEACHER"
+        ? "/teacher/attendance/today"
+        : "/attendance/today";
+  const { response, data } = await request(`${endpoint}?${params}`);
   if (ticket !== routeTicket) return;
   if (!response.ok) {
-    body.replaceChildren(messageRow(8, "No data to display"));
+    body.replaceChildren(messageRow(columns, "No data to display"));
     document.getElementById("attendance-summary").textContent = "Showing 0 – 0 of 0";
     setNamedPager("attendance", state.page, 0);
     showMessage(errorText(data));
     return;
   }
   const items = data.items || [];
-  body.replaceChildren(...(items.length ? items.map(attendanceRow) : [messageRow(8, "No data to display")]));
+  body.replaceChildren(...(items.length ? items.map(attendanceRow) : [messageRow(columns, "No data to display")]));
   const total = data.total || 0;
-  const start = total === 0 ? 0 : (state.page - 1) * pageSize + 1;
-  const end = Math.min(state.page * pageSize, total);
-  document.getElementById("attendance-summary").textContent = `Showing ${start} – ${end} of ${total}`;
+  document.getElementById("attendance-summary").textContent = Dashboard.summary(state.page, pageSize, total);
   setNamedPager("attendance", state.page, total);
 }
 
+function setAttendanceHead(student) {
+  const labels = student
+    ? ["Date", "Subject", "Status", "Check-in", "Method"]
+    : ["Student", "Roll number", "Class", "Subject", "Status", "Check-in", "Method", "Confidence"];
+  const row = document.createElement("tr");
+  for (const label of labels) {
+    const cell = document.createElement("th");
+    cell.scope = "col";
+    cell.textContent = label;
+    row.append(cell);
+  }
+  document.getElementById("attendance-head").replaceChildren(row);
+}
+
 function attendanceRow(row) {
+  if (signedIn?.role === "STUDENT") return studentAttendanceRow(row);
   const line = document.createElement("tr");
   const values = [
     `${row.first_name} ${row.last_name}`,
@@ -1313,19 +1613,42 @@ function attendanceRow(row) {
   return line;
 }
 
+function studentAttendanceRow(row) {
+  const line = document.createElement("tr");
+  const dateCell = document.createElement("td");
+  dateCell.textContent = dayLabel(row.date);
+  const subject = document.createElement("td");
+  subject.textContent = lessonSubjectName(row.subject_id);
+  const status = document.createElement("td");
+  status.append(statusPill(row.status));
+  const when = document.createElement("td");
+  when.textContent = clock(row.check_in_time);
+  const method = document.createElement("td");
+  method.textContent = row.recognition_method === "FACE_RECOGNITION" ? "Face recognition" : "Manual";
+  line.append(dateCell, subject, status, when, method);
+  return line;
+}
+
 async function loadMark(ticket) {
   stopScanner("", { quiet: true });
   await loadLessonCatalogs();
   if (ticket !== routeTicket) return;
+  const params = new URLSearchParams(location.search);
+  const classId = params.get("class_id") || "";
+  const subjectId = params.get("subject_id") || "";
   const camera = document.getElementById("camera-form");
   const manual = document.getElementById("manual-form");
-  fillClassSelect(camera.elements.class_id, "", "Choose a class");
-  fillSubjectSelect(camera.elements.subject_id, "", "", "Choose a subject");
-  fillClassSelect(manual.elements.class_id, "", "Choose a class");
-  fillSubjectSelect(manual.elements.subject_id, "", "", "Choose a subject");
-  fillStudentSelect(manual.elements.student_id);
+  fillClassSelect(camera.elements.class_id, classId, "Choose a class");
+  fillSubjectSelect(camera.elements.subject_id, classId, subjectId, "Choose a subject");
+  fillClassSelect(manual.elements.class_id, classId, "Choose a class");
+  fillSubjectSelect(manual.elements.subject_id, classId, subjectId, "Choose a subject");
+  fillStudentSelect(manual.elements.student_id, classId);
   manual.hidden = lessonStudents.length === 0;
-  setScannerStatus("Choose a class and subject, then start scanning.");
+  setScannerStatus(
+    signedIn?.role === "TEACHER"
+      ? "Choose a class and subject, then start the attendance session."
+      : "Choose a class and subject, then start scanning.",
+  );
 }
 
 async function startScanner() {
@@ -1336,11 +1659,23 @@ async function startScanner() {
     showMessage("Choose a class and a subject.");
     return;
   }
+  if (signedIn?.role === "TEACHER") {
+    const started = await request("/teacher/attendance/sessions", {
+      class_id: Number(classId),
+      subject_id: Number(subjectId),
+    });
+    if (!started.response.ok) {
+      showMessage(errorText(started.data));
+      return;
+    }
+    openSessionId = started.data.session_id;
+  }
   if (!navigator.mediaDevices?.getUserMedia) {
+    closeOpenSession();
     showMessage("This browser does not support webcam scanning.");
     return;
   }
-  stopScanner("", { quiet: true });
+  releaseScanner("", { quiet: true });
   try {
     scannerStream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "user", width: { ideal: 960 }, height: { ideal: 720 } },
@@ -1359,7 +1694,19 @@ async function startScanner() {
   }
 }
 
+function closeOpenSession() {
+  const id = openSessionId;
+  openSessionId = null;
+  if (!id) return;
+  request(`/teacher/attendance/sessions/${id}/close`, null, "POST").catch(() => {});
+}
+
 function stopScanner(message, options = {}) {
+  closeOpenSession();
+  releaseScanner(message, options);
+}
+
+function releaseScanner(message, options = {}) {
   if (scannerTimer) {
     window.clearInterval(scannerTimer);
     scannerTimer = null;
@@ -1397,6 +1744,15 @@ async function scanCurrentFrame() {
     body.append("image", blob, "webcam-frame.jpg");
     const { response, data } = await requestForm("/attendance/mark", body, "POST");
     if (response.ok) {
+      const name = `${data.first_name} ${data.last_name}`.trim();
+      if (signedIn?.role === "TEACHER") {
+        setScannerStatus(
+          data.created
+            ? `${name} marked ${label(data.status).toLowerCase()}.`
+            : `${name} was already marked today.`,
+        );
+        return;
+      }
       stopScanner("Attendance marked.");
       sessionStorage.setItem(flashKey, data.created ? "Attendance marked from live camera." : "Already marked today.");
       go("/dashboard/attendance");
@@ -1477,11 +1833,31 @@ async function submitMark(form, send) {
 }
 
 async function loadLessonCatalogs() {
-  [lessonClasses, lessonSubjects, lessonStudents] = await Promise.all([
-    pagedCatalog("/admin/classes", "/teacher/classes"),
-    pagedCatalog("/admin/subjects", "/teacher/subjects"),
-    pagedCatalog("/admin/students", ""),
+  if (signedIn?.role === "STUDENT") {
+    const [schoolClass, breakdown] = await Promise.all([
+      request("/student/class"),
+      request("/student/attendance/by-subject"),
+    ]);
+    lessonClasses = schoolClass.response.ok ? [schoolClass.data] : [];
+    lessonSubjects = (breakdown.response.ok ? breakdown.data.items : []).map((item) => ({
+      subject_id: item.subject_id,
+      class_id: item.class_id,
+      name: item.name,
+      code: item.code,
+    }));
+    lessonStudents = [];
+    return;
+  }
+  const teacher = signedIn?.role === "TEACHER";
+  const [classes, subjects] = await Promise.all([
+    pagedCatalog(teacher ? "/teacher/classes" : "/admin/classes", teacher ? "" : "/teacher/classes"),
+    pagedCatalog(teacher ? "/teacher/subjects" : "/admin/subjects", teacher ? "" : "/teacher/subjects"),
   ]);
+  lessonClasses = classes;
+  lessonSubjects = subjects;
+  lessonStudents = teacher
+    ? await studentsForClasses(lessonClasses)
+    : await pagedCatalog("/admin/students", "");
   lessonClasses.sort((left, right) => classLabel(left).localeCompare(classLabel(right)));
   lessonSubjects.sort((left, right) => String(left.name).localeCompare(String(right.name)));
   lessonStudents.sort((left, right) =>
@@ -1517,15 +1893,38 @@ function fillSubjectSelect(select, classId, current, blank) {
   fillSelect(select, subjectChoices(classId), current, blank);
 }
 
-function fillStudentSelect(select) {
+async function studentsForClasses(classes) {
+  const rows = [];
+  for (const schoolClass of classes) {
+    let pageNumber = 1;
+    let seen = 0;
+    while (pageNumber <= 20) {
+      const { response, data } = await request(
+        `/teacher/classes/${schoolClass.class_id}/students?status=ACTIVE&page=${pageNumber}&page_size=100`,
+      );
+      if (!response.ok) break;
+      const items = data.items || [];
+      rows.push(...items.map((item) => ({ ...item, class_id: schoolClass.class_id })));
+      seen += items.length;
+      if (!items.length || seen >= (data.total || 0)) break;
+      pageNumber += 1;
+    }
+  }
+  return rows;
+}
+
+function fillStudentSelect(select, classId) {
+  const pool = classId
+    ? lessonStudents.filter((student) => String(student.class_id) === String(classId))
+    : lessonStudents;
   fillSelect(
     select,
-    lessonStudents.map((student) => [
+    pool.map((student) => [
       String(student.student_id),
       `${student.roll_number} · ${student.first_name} ${student.last_name}`,
     ]),
     "",
-    lessonStudents.length ? "Choose a student" : "No students yet",
+    pool.length ? "Choose a student" : "No students in this class",
   );
 }
 
@@ -1537,21 +1936,108 @@ function subjectChoices(classId) {
 }
 
 function fillSelect(select, choices, current, blank) {
-  select.replaceChildren();
-  if (blank != null) {
-    const option = document.createElement("option");
-    option.value = "";
-    option.textContent = blank;
-    select.append(option);
+  Dashboard.fillSelect(select, choices, current, blank);
+}
+
+function reportQuery() {
+  const params = new URLSearchParams(location.search);
+  return {
+    classId: params.get("class_id") || "",
+    subjectId: params.get("subject_id") || "",
+    dateFrom: params.get("date_from") || "",
+    dateTo: params.get("date_to") || "",
+  };
+}
+
+function reportPath(state) {
+  const params = new URLSearchParams();
+  if (state.classId) params.set("class_id", state.classId);
+  if (state.subjectId) params.set("subject_id", state.subjectId);
+  if (state.dateFrom) params.set("date_from", state.dateFrom);
+  if (state.dateTo) params.set("date_to", state.dateTo);
+  const query = params.toString();
+  return `/dashboard/reports${query ? `?${query}` : ""}`;
+}
+
+function moveReport() {
+  if (route.name !== "reports") return;
+  const form = document.getElementById("report-form");
+  const classId = value(form, "class_id");
+  let subjectId = value(form, "subject_id");
+  if (subjectId && !subjectChoices(classId).some(([id]) => id === subjectId)) subjectId = "";
+  go(reportPath({
+    classId,
+    subjectId,
+    dateFrom: value(form, "date_from"),
+    dateTo: value(form, "date_to"),
+  }));
+}
+
+async function loadReports(ticket) {
+  const state = reportQuery();
+  const cards = document.getElementById("report-cards");
+  cards.replaceChildren();
+  await loadLessonCatalogs();
+  if (ticket !== routeTicket) return;
+  const form = document.getElementById("report-form");
+  fillClassSelect(form.elements.class_id, state.classId, "All");
+  fillSubjectSelect(form.elements.subject_id, state.classId, state.subjectId, "All");
+  form.elements.date_from.value = state.dateFrom;
+  form.elements.date_to.value = state.dateTo;
+  const params = new URLSearchParams();
+  if (state.classId) params.set("class_id", state.classId);
+  if (state.subjectId) params.set("subject_id", state.subjectId);
+  if (state.dateFrom) params.set("date_from", state.dateFrom);
+  if (state.dateTo) params.set("date_to", state.dateTo);
+  const query = params.toString();
+  const { response, data } = await request(`/teacher/attendance/statistics${query ? `?${query}` : ""}`);
+  if (ticket !== routeTicket) return;
+  if (!response.ok) {
+    showMessage(errorText(data));
+    return;
   }
-  for (const [optionValue, optionLabel] of choices) {
-    const option = document.createElement("option");
-    option.value = optionValue;
-    option.textContent = optionLabel;
-    select.append(option);
+  cards.append(
+    Dashboard.statCard("Present", data.present),
+    Dashboard.statCard("Absent", data.absent),
+    Dashboard.statCard("Late", data.late),
+    Dashboard.statCard("Excused", data.excused),
+    Dashboard.statCard("Total", data.total),
+  );
+}
+
+async function exportReport() {
+  const form = document.getElementById("report-form");
+  const params = new URLSearchParams();
+  const classId = value(form, "class_id");
+  const subjectId = value(form, "subject_id");
+  const dateFrom = value(form, "date_from");
+  const dateTo = value(form, "date_to");
+  if (classId) params.set("class_id", classId);
+  if (subjectId) params.set("subject_id", subjectId);
+  if (dateFrom) params.set("date_from", dateFrom);
+  if (dateTo) params.set("date_to", dateTo);
+  const token = sessionStorage.getItem(tokenKey);
+  try {
+    const response = await fetch(`/teacher/attendance/export?${params}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      showMessage(errorText(data));
+      return;
+    }
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "attendance-report.csv";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  } catch {
+    showMessage("The server could not be reached.");
   }
-  const wanted = current == null ? "" : String(current);
-  select.value = [...select.options].some((option) => option.value === wanted) ? wanted : "";
 }
 
 function lessonClassName(id) {
@@ -1571,9 +2057,205 @@ function clock(value) {
   return parsed.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
+function dayLabel(value) {
+  if (!value) return "—";
+  const parts = String(value).slice(0, 10).split("-").map(Number);
+  if (parts.length !== 3 || parts.some((part) => Number.isNaN(part))) return String(value);
+  return new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function genderLabel(value) {
+  return { FEMALE: "Female", MALE: "Male", OTHER: "Other" }[value] || "—";
+}
+
+function percentText(value) {
+  if (value == null || value === "") return "—";
+  return `${Number(value).toFixed(1)}%`;
+}
+
+async function loadProfile(ticket) {
+  const fields = document.getElementById("profile-fields");
+  fields.replaceChildren();
+  const [profile, schoolClass] = await Promise.all([
+    request("/student/profile"),
+    request("/student/class"),
+  ]);
+  if (ticket !== routeTicket) return;
+  if (!profile.response.ok) {
+    showMessage(profile.response.status === 404 ? "Student profile not found." : errorText(profile.data));
+    return;
+  }
+  const row = profile.data;
+  const enrolled = schoolClass.response.ok ? schoolClass.data : null;
+  const pairs = [
+    ["Name", `${row.first_name} ${row.last_name}`],
+    ["Email", row.email],
+    ["Phone", row.phone || "—"],
+    ["Roll number", row.roll_number],
+    ["Date of birth", row.date_of_birth ? dayLabel(row.date_of_birth) : "—"],
+    ["Gender", genderLabel(row.gender)],
+    ["Class", enrolled ? `${enrolled.name}-${enrolled.section}` : "Not enrolled"],
+    ["Academic year", enrolled ? enrolled.academic_year : "—"],
+  ];
+  fields.replaceChildren(...pairs.map(([term, value]) => {
+    const wrap = document.createElement("div");
+    const labelNode = document.createElement("dt");
+    labelNode.textContent = term;
+    const valueNode = document.createElement("dd");
+    valueNode.textContent = value || "—";
+    wrap.append(labelNode, valueNode);
+    return wrap;
+  }));
+  const statusWrap = document.createElement("div");
+  const statusTerm = document.createElement("dt");
+  statusTerm.textContent = "Status";
+  const statusValue = document.createElement("dd");
+  statusValue.append(statusPill(row.status));
+  statusWrap.append(statusTerm, statusValue);
+  fields.append(statusWrap);
+  setHeading(`${row.first_name} ${row.last_name}`);
+}
+
+async function loadPercentage(ticket) {
+  const cards = document.getElementById("percentage-cards");
+  const body = document.getElementById("percentage-body");
+  cards.replaceChildren();
+  body.replaceChildren(messageRow(7, "Loading…"));
+  const [overall, subjects] = await Promise.all([
+    request("/student/attendance/percentage"),
+    request("/student/attendance/by-subject"),
+  ]);
+  if (ticket !== routeTicket) return;
+  if (!overall.response.ok) {
+    body.replaceChildren(messageRow(7, "No data to display"));
+    showMessage(errorText(overall.data));
+    return;
+  }
+  const counts = overall.data;
+  addStatCard(cards, "", "Attendance %", percentText(counts.percentage));
+  addStatCard(cards, "", "Present", counts.present);
+  addStatCard(cards, "", "Absent", counts.absent);
+  addStatCard(cards, "", "Late", counts.late);
+  addStatCard(cards, "", "Excused", counts.excused);
+  const columns = [
+    textColumn("Subject", (row) => row.name),
+    textColumn("Code", (row) => row.code),
+    textColumn("Present", (row) => String(row.present)),
+    textColumn("Absent", (row) => String(row.absent)),
+    textColumn("Late", (row) => String(row.late)),
+    textColumn("Excused", (row) => String(row.excused)),
+    textColumn("Attendance %", (row) => percentText(row.percentage)),
+  ];
+  if (!subjects.response.ok) {
+    body.replaceChildren(messageRow(7, "No data to display"));
+    showMessage(errorText(subjects.data));
+    return;
+  }
+  Dashboard.renderRows(body, columns, subjects.data.items || [], "No subjects to display");
+}
+
+function calendarQuery() {
+  const params = new URLSearchParams(location.search);
+  const now = new Date();
+  const fallback = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const month = /^\d{4}-\d{2}$/.test(params.get("month") || "") ? params.get("month") : fallback;
+  return { month, subjectId: params.get("subject_id") || "" };
+}
+
+function moveCalendar() {
+  if (route.name !== "calendar") return;
+  const form = document.getElementById("calendar-form");
+  const params = new URLSearchParams();
+  const month = value(form, "month");
+  const subjectId = value(form, "subject_id");
+  if (month) params.set("month", month);
+  if (subjectId) params.set("subject_id", subjectId);
+  const query = params.toString();
+  go(`/dashboard/attendance/calendar${query ? `?${query}` : ""}`);
+}
+
+async function loadCalendar(ticket) {
+  const state = calendarQuery();
+  const form = document.getElementById("calendar-form");
+  const cards = document.getElementById("calendar-cards");
+  cards.replaceChildren();
+  document.getElementById("calendar-grid").replaceChildren();
+  form.elements.month.value = state.month;
+  await loadLessonCatalogs();
+  if (ticket !== routeTicket) return;
+  fillSubjectSelect(form.elements.subject_id, "", state.subjectId, "All");
+  const [year, month] = state.month.split("-").map(Number);
+  const params = new URLSearchParams({ year: String(year), month: String(month) });
+  if (state.subjectId) params.set("subject_id", state.subjectId);
+  const { response, data } = await request(`/student/attendance/calendar?${params}`);
+  if (ticket !== routeTicket) return;
+  if (!response.ok) {
+    document.getElementById("calendar-summary").textContent = "Attendance for this month could not be loaded.";
+    showMessage(errorText(data));
+    return;
+  }
+  document.getElementById("calendar-summary").textContent = data.percentage == null
+    ? "No counted attendance this month."
+    : `${percentText(data.percentage)} attended this month.`;
+  addStatCard(cards, "", "Attendance %", percentText(data.percentage));
+  addStatCard(cards, "", "Present", data.present);
+  addStatCard(cards, "", "Absent", data.absent);
+  addStatCard(cards, "", "Late", data.late);
+  renderCalendar(year, month, data.days || []);
+}
+
+function renderCalendar(year, month, days) {
+  const grid = document.getElementById("calendar-grid");
+  const byDate = new Map(days.map((day) => [day.date, day]));
+  const nodes = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((name) => {
+    const cell = document.createElement("div");
+    cell.className = "calendar-head";
+    cell.textContent = name;
+    return cell;
+  });
+  const offset = (new Date(year, month - 1, 1).getDay() + 6) % 7;
+  const count = new Date(year, month, 0).getDate();
+  const today = new Date();
+  const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+  for (let index = 0; index < offset; index += 1) {
+    const pad = document.createElement("div");
+    pad.className = "calendar-day is-pad";
+    pad.setAttribute("aria-hidden", "true");
+    nodes.push(pad);
+  }
+  for (let day = 1; day <= count; day += 1) {
+    const key = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const cell = document.createElement("div");
+    const mark = byDate.get(key);
+    cell.className = "calendar-day";
+    if (mark) cell.classList.add(`is-${String(mark.status).toLowerCase()}`);
+    if (key === todayKey) cell.classList.add("is-today");
+    const number = document.createElement("strong");
+    number.textContent = String(day);
+    cell.append(number);
+    if (mark) {
+      const note = document.createElement("small");
+      note.textContent = label(mark.status);
+      cell.append(note);
+      cell.setAttribute("aria-label", `${dayLabel(key)}, ${note.textContent}`);
+    }
+    nodes.push(cell);
+  }
+  grid.replaceChildren(...nodes);
+}
+
 function setNamedPager(prefix, page, total) {
-  document.getElementById(`${prefix}-prev`).disabled = page <= 1;
-  document.getElementById(`${prefix}-next`).disabled = page * pageSize >= total;
+  Dashboard.setPager(
+    document.getElementById(`${prefix}-prev`),
+    document.getElementById(`${prefix}-next`),
+    page,
+    pageSize,
+    total,
+  );
 }
 
 async function requestForm(path, body, method) {

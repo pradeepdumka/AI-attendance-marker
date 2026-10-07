@@ -17,7 +17,6 @@
     <nav class="nav" aria-label="Primary">
       <a href="/" data-nav="home" aria-current="page">Home</a>
       <a href="/login" data-nav="login" data-guest>Sign in</a>
-      <a href="/register" data-nav="register" data-guest>Register</a>
       <a href="/dashboard" data-nav="dashboard" data-user hidden>Dashboard</a>
       <button type="button" class="text-button" data-logout data-user hidden>Log out</button>
     </nav>
@@ -30,8 +29,7 @@
         <h1>The class is marked before the lesson starts.</h1>
         <p class="lede">Students, teachers, and admins share one roster. Sign in to manage classes, subjects, face enrollment, and attendance.</p>
         <div class="actions">
-          <a class="button" href="/register" data-guest-cta>Create an account</a>
-          <a class="button button-quiet" href="/login" data-guest>I already have one</a>
+          <a class="button" href="/login" data-guest>Sign in</a>
           <a class="button" href="/dashboard" data-user hidden>Open the dashboard</a>
         </div>
       </div>
@@ -54,7 +52,7 @@
       <ul class="cards">
         <li>
           <h3>Students</h3>
-          <p>Register, then open the profile tied to your class.</p>
+          <p>Sign in to see your class, subjects, and attendance.</p>
         </li>
         <li>
           <h3>Teachers</h3>
@@ -72,7 +70,6 @@
     <p>AI Attendance Marker</p>
     <nav aria-label="Footer">
       <a href="/login" data-guest>Sign in</a>
-      <a href="/register" data-guest>Register</a>
     </nav>
   </footer>
   <script src="/assets/app.js" defer></script>

@@ -6,6 +6,7 @@ changes live in `app.services.students`. Teacher profile changes live in
 `app.services.teachers`. Class, subject, and enrollment changes live in
 `app.services.academics`. Face sample storage lives in
 `app.services.face_enrollment`. Matching a frame to those samples lives
-in `app.services.face_recognition`. Saving the match as attendance lives
-in `app.services.attendance`.
+in `app.services.face_recognition`. Saving the match as attendance,
+opening a teacher's session, and building teacher and student reports
+live in `app.services.attendance`.
 """

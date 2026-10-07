@@ -10,12 +10,13 @@ This module does not store the camera frame.
 from __future__ import annotations
 
 import logging
+from calendar import monthrange
 from collections.abc import Callable
 from datetime import date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, select
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
@@ -23,6 +24,7 @@ import app.models  # noqa: F401  # register every mapper before writing attendan
 from app.ai.recognition import RecognitionResult
 from app.config import get_settings
 from app.models.attendance import Attendance, AttendanceMethod, AttendanceStatus
+from app.models.attendance_session import AttendanceSession, SessionStatus
 from app.models.audit_log import AuditLog
 from app.models.base import utcnow
 from app.models.class_model import SchoolClass
@@ -31,6 +33,7 @@ from app.models.student import Student
 from app.models.subject import Subject
 from app.models.teacher import Teacher
 from app.models.user import User, UserRole
+from app.services.academics import enrolled_class
 from app.services.face_recognition import recognize_frame
 from app.services.teachers import get_teacher_for_user
 
@@ -91,12 +94,28 @@ class InvalidDateRange(AttendanceError):
     """The history range ends before it starts."""
 
 
+class SessionNotFound(AttendanceError):
+    """This teacher has no attendance session with that id."""
+
+
 class AttendanceMark:
     """A stored row and whether this call inserted it."""
 
     def __init__(self, record: Attendance, *, created: bool) -> None:
         self.record = record
         self.created = created
+
+
+class AttendanceSessionStart:
+    """A stored session and whether this call inserted it."""
+
+    def __init__(self, record: AttendanceSession, *, created: bool) -> None:
+        self.record = record
+        self.created = created
+
+
+# A teacher who is only a subject teacher must not read another subject's rows.
+MarkRestrict = tuple[set[int], set[int]] | None
 
 
 def mark_from_frame(
@@ -181,12 +200,10 @@ def list_today(
 ) -> tuple[list[Attendance], int]:
     """Return today's marks the caller is allowed to see."""
     day = local_now(now).date()
-    class_ids = _visible_class_ids(db, actor, class_id)
-    if class_ids is not None and not class_ids:
-        return [], 0
+    restrict = _prepare_staff_read(db, actor, class_id, subject_id)
     return _list_marks(
         db,
-        class_ids=class_ids,
+        restrict=restrict,
         class_id=class_id,
         subject_id=subject_id,
         student_id=None,
@@ -214,10 +231,13 @@ def list_class_attendance(
     _require_visible_class(db, actor, class_id)
     if subject_id is not None:
         _require_subject_in_class(db, class_id, subject_id)
+        if actor.role == UserRole.TEACHER:
+            _require_readable_subject(db, actor, subject_id, class_id)
     on = day if day is not None else local_now(now).date()
+    restrict = _teacher_restrict(db, actor) if actor.role == UserRole.TEACHER else None
     return _list_marks(
         db,
-        class_ids=None,
+        restrict=restrict,
         class_id=class_id,
         subject_id=subject_id,
         student_id=None,
@@ -245,9 +265,12 @@ def list_student_history(
     _require_visible_student(db, actor, student_id)
     if date_from is not None and date_to is not None and date_from > date_to:
         raise InvalidDateRange
+    if subject_id is not None and actor.role == UserRole.TEACHER:
+        _require_readable_subject(db, actor, subject_id, None)
+    restrict = _teacher_restrict(db, actor) if actor.role == UserRole.TEACHER else None
     return _list_marks(
         db,
-        class_ids=None,
+        restrict=restrict,
         class_id=None,
         subject_id=subject_id,
         student_id=student_id,
@@ -258,6 +281,325 @@ def list_student_history(
         page_size=page_size,
         newest_first=True,
     )
+
+
+def student_attendance_counts(
+    db: Session,
+    *,
+    actor: User,
+    student_id: int,
+    date_from: date | None,
+    date_to: date | None,
+    subject_id: int | None,
+) -> dict[AttendanceStatus, int]:
+    """Count the signed-in student's own marks.
+
+    A subject filter that is not this student's still returns zeros.
+    It does not reveal whether that subject exists.
+    """
+    student = _require_student_self(db, actor, student_id)
+    _require_date_order(date_from, date_to)
+    return _status_counts(
+        db,
+        student_id=student.id,
+        subject_id=subject_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+
+def student_attendance_by_subject(
+    db: Session,
+    *,
+    actor: User,
+    student_id: int,
+    date_from: date | None,
+    date_to: date | None,
+) -> list[tuple[Subject, dict[AttendanceStatus, int]]]:
+    """Return this student's totals for each visible subject.
+
+    Current active subjects are included even with no marks. A subject
+    from an earlier class is included only when this student has a mark.
+    """
+    student = _require_student_self(db, actor, student_id)
+    _require_date_order(date_from, date_to)
+    grouped = _grouped_counts(
+        db,
+        student_id=student.id,
+        subject_id=None,
+        date_from=date_from,
+        date_to=date_to,
+        column=Attendance.subject_id,
+    )
+    subjects = _subjects_for_student(db, student.id, set(grouped))
+    return [(subject, grouped.get(subject.id, _zero_counts())) for subject in subjects]
+
+
+def student_month_counts(
+    db: Session,
+    *,
+    actor: User,
+    student_id: int,
+    year: int,
+    month: int,
+    subject_id: int | None,
+) -> dict[AttendanceStatus, int]:
+    """Count the signed-in student's marks in one calendar month."""
+    start, end = _month_span(year, month)
+    return student_attendance_counts(
+        db,
+        actor=actor,
+        student_id=student_id,
+        date_from=start,
+        date_to=end,
+        subject_id=subject_id,
+    )
+
+
+def student_attendance_calendar(
+    db: Session,
+    *,
+    actor: User,
+    student_id: int,
+    year: int,
+    month: int,
+    subject_id: int | None,
+) -> tuple[dict[AttendanceStatus, int], list[tuple[date, dict[AttendanceStatus, int]]]]:
+    """Return the month totals and each date that has a mark."""
+    student = _require_student_self(db, actor, student_id)
+    start, end = _month_span(year, month)
+    totals = _status_counts(
+        db,
+        student_id=student.id,
+        subject_id=subject_id,
+        date_from=start,
+        date_to=end,
+    )
+    grouped = _grouped_counts(
+        db,
+        student_id=student.id,
+        subject_id=subject_id,
+        date_from=start,
+        date_to=end,
+        column=Attendance.attendance_date,
+    )
+    days = [(_as_date(day), counts) for day, counts in grouped.items()]
+    days.sort(key=lambda item: item[0])
+    return totals, days
+
+
+def list_history(
+    db: Session,
+    *,
+    actor: User,
+    class_id: int | None,
+    subject_id: int | None,
+    date_from: date | None,
+    date_to: date | None,
+    page: int,
+    page_size: int,
+) -> tuple[list[Attendance], int]:
+    """Return attendance in a date range, newest date first."""
+    _require_date_order(date_from, date_to)
+    restrict = _prepare_staff_read(db, actor, class_id, subject_id)
+    return _list_marks(
+        db,
+        restrict=restrict,
+        class_id=class_id,
+        subject_id=subject_id,
+        student_id=None,
+        day=None,
+        date_from=date_from,
+        date_to=date_to,
+        page=page,
+        page_size=page_size,
+        newest_first=True,
+    )
+
+
+def attendance_statistics(
+    db: Session,
+    *,
+    actor: User,
+    class_id: int | None,
+    subject_id: int | None,
+    date_from: date | None,
+    date_to: date | None,
+) -> dict[AttendanceStatus, int]:
+    """Count each status for attendance the caller is allowed to read."""
+    _require_date_order(date_from, date_to)
+    restrict = _prepare_staff_read(db, actor, class_id, subject_id)
+    rows = db.execute(
+        _filtered(
+            select(Attendance.status, func.count(Attendance.id)),
+            restrict=restrict,
+            class_id=class_id,
+            subject_id=subject_id,
+            student_id=None,
+            day=None,
+            date_from=date_from,
+            date_to=date_to,
+        ).group_by(Attendance.status)
+    ).all()
+    counts = {status: 0 for status in AttendanceStatus}
+    for status, count in rows:
+        key = status if isinstance(status, AttendanceStatus) else AttendanceStatus(status)
+        counts[key] = int(count)
+    return counts
+
+
+def export_attendance(
+    db: Session,
+    *,
+    actor: User,
+    class_id: int | None,
+    subject_id: int | None,
+    date_from: date | None,
+    date_to: date | None,
+    limit: int = 5000,
+) -> list[Attendance]:
+    """Return attendance rows for a CSV report, newest date first."""
+    _require_date_order(date_from, date_to)
+    restrict = _prepare_staff_read(db, actor, class_id, subject_id)
+    rows = db.scalars(
+        _filtered(
+            select(Attendance),
+            restrict=restrict,
+            class_id=class_id,
+            subject_id=subject_id,
+            student_id=None,
+            day=None,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        .options(
+            joinedload(Attendance.student).joinedload(Student.user),
+            joinedload(Attendance.school_class),
+            joinedload(Attendance.subject),
+        )
+        .order_by(Attendance.attendance_date.desc(), Attendance.id.desc())
+        .limit(limit)
+    ).unique().all()
+    return list(rows)
+
+
+def start_attendance_session(
+    db: Session,
+    *,
+    actor: User,
+    class_id: int,
+    subject_id: int,
+    ip_address: str | None = None,
+    now: datetime | None = None,
+) -> AttendanceSessionStart:
+    """Open today's session for a class and subject assigned to this teacher.
+
+    The same lesson and date returns the existing row. A closed session
+    opens again. A teacher who is not assigned does not create a row.
+    """
+    teacher = _require_session_teacher(db, actor)
+    _lesson(db, actor, class_id, subject_id)
+    day = local_now(now).date()
+    existing = _find_session(
+        db,
+        teacher_id=teacher.id,
+        class_id=class_id,
+        subject_id=subject_id,
+        day=day,
+    )
+    if existing is not None and existing.status == SessionStatus.OPEN:
+        return AttendanceSessionStart(existing, created=False)
+    if existing is not None:
+        existing.status = SessionStatus.OPEN
+        existing.started_at = utcnow()
+        existing.ended_at = None
+        existing.updated_at = utcnow()
+        _audit_session(
+            db,
+            actor_id=actor.id,
+            session_id=existing.id,
+            class_id=class_id,
+            subject_id=subject_id,
+            day=day,
+            action="attendance.session_started",
+            ip_address=ip_address,
+        )
+        db.commit()
+        db.refresh(existing)
+        return AttendanceSessionStart(existing, created=False)
+    record = AttendanceSession(
+        teacher_id=teacher.id,
+        class_id=class_id,
+        subject_id=subject_id,
+        session_date=day,
+        status=SessionStatus.OPEN,
+        started_at=utcnow(),
+    )
+    try:
+        db.add(record)
+        db.flush()
+        _audit_session(
+            db,
+            actor_id=actor.id,
+            session_id=record.id,
+            class_id=class_id,
+            subject_id=subject_id,
+            day=day,
+            action="attendance.session_started",
+            ip_address=ip_address,
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if not _is_duplicate_session(exc):
+            raise
+        raced = _find_session(
+            db,
+            teacher_id=teacher.id,
+            class_id=class_id,
+            subject_id=subject_id,
+            day=day,
+        )
+        if raced is None:
+            raise
+        return AttendanceSessionStart(raced, created=False)
+    except Exception:
+        db.rollback()
+        raise
+    db.refresh(record)
+    return AttendanceSessionStart(record, created=True)
+
+
+def close_attendance_session(
+    db: Session,
+    *,
+    actor: User,
+    session_id: int,
+    ip_address: str | None = None,
+) -> AttendanceSession:
+    """Close a session that belongs to this teacher. Closing twice is a no-op."""
+    teacher = _require_session_teacher(db, actor)
+    record = db.get(AttendanceSession, session_id)
+    if record is None or record.teacher_id != teacher.id:
+        raise SessionNotFound
+    if record.status == SessionStatus.CLOSED:
+        return record
+    record.status = SessionStatus.CLOSED
+    record.ended_at = utcnow()
+    record.updated_at = utcnow()
+    _audit_session(
+        db,
+        actor_id=actor.id,
+        session_id=record.id,
+        class_id=record.class_id,
+        subject_id=record.subject_id,
+        day=record.session_date,
+        action="attendance.session_closed",
+        ip_address=ip_address,
+    )
+    db.commit()
+    db.refresh(record)
+    return record
 
 
 def local_now(now: datetime | None = None) -> datetime:
@@ -470,6 +812,113 @@ def _require_visible_student(db: Session, actor: User, student_id: int) -> Stude
     return student
 
 
+def _require_student_self(db: Session, actor: User, student_id: int) -> Student:
+    """Return this student's own profile. Any other caller is not found."""
+    if actor.role != UserRole.STUDENT:
+        raise StudentNotFound
+    student = _require_visible_student(db, actor, student_id)
+    if student.user_id != actor.id:
+        raise StudentNotFound
+    return student
+
+
+def _zero_counts() -> dict[AttendanceStatus, int]:
+    return {status: 0 for status in AttendanceStatus}
+
+
+def _status_counts(
+    db: Session,
+    *,
+    student_id: int,
+    subject_id: int | None,
+    date_from: date | None,
+    date_to: date | None,
+) -> dict[AttendanceStatus, int]:
+    rows = db.execute(
+        _filtered(
+            select(Attendance.status, func.count(Attendance.id)),
+            restrict=None,
+            class_id=None,
+            subject_id=subject_id,
+            student_id=student_id,
+            day=None,
+            date_from=date_from,
+            date_to=date_to,
+        ).group_by(Attendance.status)
+    ).all()
+    counts = _zero_counts()
+    for status, count in rows:
+        key = status if isinstance(status, AttendanceStatus) else AttendanceStatus(status)
+        counts[key] = int(count)
+    return counts
+
+
+def _grouped_counts(
+    db: Session,
+    *,
+    student_id: int,
+    subject_id: int | None,
+    date_from: date | None,
+    date_to: date | None,
+    column,
+) -> dict[object, dict[AttendanceStatus, int]]:
+    rows = db.execute(
+        _filtered(
+            select(column, Attendance.status, func.count(Attendance.id)),
+            restrict=None,
+            class_id=None,
+            subject_id=subject_id,
+            student_id=student_id,
+            day=None,
+            date_from=date_from,
+            date_to=date_to,
+        ).group_by(column, Attendance.status)
+    ).all()
+    grouped: dict[object, dict[AttendanceStatus, int]] = {}
+    for key, status, count in rows:
+        bucket = grouped.setdefault(key, _zero_counts())
+        kind = status if isinstance(status, AttendanceStatus) else AttendanceStatus(status)
+        bucket[kind] = int(count)
+    return grouped
+
+
+def _subjects_for_student(
+    db: Session,
+    student_id: int,
+    marked_ids: set[object],
+) -> list[Subject]:
+    subjects: dict[int, Subject] = {}
+    school_class = enrolled_class(db, student_id)
+    if school_class is not None:
+        current = db.scalars(
+            select(Subject).where(
+                Subject.class_id == school_class.id,
+                Subject.is_active.is_(True),
+            )
+        ).all()
+        for subject in current:
+            subjects[subject.id] = subject
+    missing = [int(subject_id) for subject_id in marked_ids if int(subject_id) not in subjects]
+    if missing:
+        earlier = db.scalars(select(Subject).where(Subject.id.in_(missing))).all()
+        for subject in earlier:
+            subjects[subject.id] = subject
+    return sorted(subjects.values(), key=lambda subject: (subject.code, subject.name, subject.id))
+
+
+def _month_span(year: int, month: int) -> tuple[date, date]:
+    last = monthrange(year, month)[1]
+    return date(year, month, 1), date(year, month, last)
+
+
+def _as_date(value: date | datetime | str) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
 def _teacher_sees_student(db: Session, teacher_id: int, student_id: int) -> bool:
     class_ids = select(Enrollment.class_id).where(
         Enrollment.student_id == student_id,
@@ -497,35 +946,106 @@ def _teacher_sees_student(db: Session, teacher_id: int, student_id: int) -> bool
     return subject_id is not None
 
 
-def _visible_class_ids(db: Session, actor: User, class_id: int | None) -> set[int] | None:
-    """Return None when an admin may see every class."""
+def _prepare_staff_read(
+    db: Session,
+    actor: User,
+    class_id: int | None,
+    subject_id: int | None,
+) -> MarkRestrict:
+    """Return a teacher scope, or None when an admin may read every class.
+
+    A class teacher can read every subject in that class. A subject teacher
+    can read only the subjects assigned to them.
+    """
     if actor.role == UserRole.ADMIN:
         if class_id is not None:
             _require_class(db, class_id)
         return None
     if actor.role != UserRole.TEACHER:
         raise AttendanceNotAllowed
+    restrict = _teacher_restrict(db, actor)
+    if class_id is not None:
+        _require_visible_class(db, actor, class_id)
+    if subject_id is not None:
+        _require_readable_subject(db, actor, subject_id, class_id)
+    return restrict
+
+
+def _teacher_restrict(db: Session, actor: User) -> tuple[set[int], set[int]]:
+    """Return homeroom class ids and subject ids this teacher may read."""
+    if actor.role != UserRole.TEACHER:
+        raise AttendanceNotAllowed
     teacher = get_teacher_for_user(db, actor.id)
     if teacher is None:
         raise TeacherProfileNotFound
-    if class_id is not None:
-        _require_visible_class(db, actor, class_id)
-        return {class_id}
     homerooms = set(
         db.scalars(
             select(SchoolClass.id).where(SchoolClass.class_teacher_id == teacher.id)
         ).all()
     )
-    taught = set(
-        db.scalars(select(Subject.class_id).where(Subject.teacher_id == teacher.id)).all()
+    subjects = set(
+        db.scalars(select(Subject.id).where(Subject.teacher_id == teacher.id)).all()
     )
-    return homerooms | taught
+    return homerooms, subjects
+
+
+def _require_readable_subject(
+    db: Session,
+    actor: User,
+    subject_id: int,
+    class_id: int | None,
+) -> Subject:
+    """Reject a subject this teacher does not teach and does not homeroom."""
+    subject = db.get(Subject, subject_id)
+    if subject is None or (class_id is not None and subject.class_id != class_id):
+        raise SubjectNotFound
+    if actor.role != UserRole.TEACHER:
+        return subject
+    teacher = get_teacher_for_user(db, actor.id)
+    if teacher is None:
+        raise TeacherProfileNotFound
+    school_class = db.get(SchoolClass, subject.class_id)
+    if school_class is None:
+        raise SubjectNotFound
+    if school_class.class_teacher_id == teacher.id or subject.teacher_id == teacher.id:
+        return subject
+    raise SubjectNotFound
+
+
+def _require_session_teacher(db: Session, actor: User) -> Teacher:
+    if actor.role != UserRole.TEACHER:
+        raise AttendanceNotAllowed
+    teacher = get_teacher_for_user(db, actor.id)
+    if teacher is None:
+        raise TeacherProfileNotFound
+    return teacher
+
+
+def _require_date_order(date_from: date | None, date_to: date | None) -> None:
+    if date_from is not None and date_to is not None and date_from > date_to:
+        raise InvalidDateRange
+
+
+def _restrict_clause(restrict: MarkRestrict):
+    if restrict is None:
+        return None
+    homerooms, subjects = restrict
+    parts = []
+    if homerooms:
+        parts.append(Attendance.class_id.in_(homerooms))
+    if subjects:
+        parts.append(Attendance.subject_id.in_(subjects))
+    if not parts:
+        return false()
+    if len(parts) == 1:
+        return parts[0]
+    return or_(*parts)
 
 
 def _list_marks(
     db: Session,
     *,
-    class_ids: set[int] | None,
+    restrict: MarkRestrict,
     class_id: int | None,
     subject_id: int | None,
     student_id: int | None,
@@ -538,7 +1058,7 @@ def _list_marks(
 ) -> tuple[list[Attendance], int]:
     filtered = _filtered(
         select(Attendance),
-        class_ids=class_ids,
+        restrict=restrict,
         class_id=class_id,
         subject_id=subject_id,
         student_id=student_id,
@@ -549,7 +1069,7 @@ def _list_marks(
     total = db.scalar(
         _filtered(
             select(func.count(Attendance.id)),
-            class_ids=class_ids,
+            restrict=restrict,
             class_id=class_id,
             subject_id=subject_id,
             student_id=student_id,
@@ -576,7 +1096,7 @@ def _list_marks(
 def _filtered(
     statement,
     *,
-    class_ids: set[int] | None,
+    restrict: MarkRestrict,
     class_id: int | None,
     subject_id: int | None,
     student_id: int | None,
@@ -584,8 +1104,9 @@ def _filtered(
     date_from: date | None,
     date_to: date | None,
 ):
-    if class_ids is not None:
-        statement = statement.where(Attendance.class_id.in_(class_ids))
+    clause = _restrict_clause(restrict)
+    if clause is not None:
+        statement = statement.where(clause)
     if class_id is not None:
         statement = statement.where(Attendance.class_id == class_id)
     if subject_id is not None:
@@ -599,6 +1120,24 @@ def _filtered(
     if date_to is not None:
         statement = statement.where(Attendance.attendance_date <= date_to)
     return statement
+
+
+def _find_session(
+    db: Session,
+    *,
+    teacher_id: int,
+    class_id: int,
+    subject_id: int,
+    day: date,
+) -> AttendanceSession | None:
+    return db.scalar(
+        select(AttendanceSession).where(
+            AttendanceSession.teacher_id == teacher_id,
+            AttendanceSession.class_id == class_id,
+            AttendanceSession.subject_id == subject_id,
+            AttendanceSession.session_date == day,
+        )
+    )
 
 
 def _find_mark(db: Session, *, student_id: int, subject_id: int, day: date) -> Attendance | None:
@@ -642,10 +1181,44 @@ def _confidence_score(confidence: float | None) -> Decimal | None:
     return score
 
 
+def _is_duplicate_session(exc: IntegrityError) -> bool:
+    message = str(exc.orig).lower()
+    return "uq_attendance_sessions_lesson_date" in message or (
+        "attendance_sessions.teacher_id" in message and "attendance_sessions.subject_id" in message
+    )
+
+
 def _is_duplicate_mark(exc: IntegrityError) -> bool:
     message = str(exc.orig).lower()
     return "uq_attendance_student_subject_date" in message or (
         "attendance_records.student_id" in message and "attendance_records.subject_id" in message
+    )
+
+
+def _audit_session(
+    db: Session,
+    *,
+    actor_id: int,
+    session_id: int,
+    class_id: int,
+    subject_id: int,
+    day: date,
+    action: str,
+    ip_address: str | None,
+) -> None:
+    db.add(
+        AuditLog(
+            actor_id=actor_id,
+            action=action,
+            entity_type="attendance_session",
+            entity_id=str(session_id),
+            details={
+                "class_id": class_id,
+                "subject_id": subject_id,
+                "date": day.isoformat(),
+            },
+            ip_address=ip_address,
+        )
     )
 
 

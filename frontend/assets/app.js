@@ -12,7 +12,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
   const page = document.body.dataset.page;
   if (page === "login") document.getElementById("login-form")?.addEventListener("submit", onLogin);
-  if (page === "register") document.getElementById("register-form")?.addEventListener("submit", onRegister);
   if (page === "account") loadAccount();
 });
 
@@ -27,37 +26,6 @@ async function onLogin(event) {
   }
   await submit(form, "/auth/login", { email, password }, async (data) => {
     sessionStorage.setItem(tokenKey, data.access_token);
-    window.location.assign("/dashboard");
-  });
-}
-
-async function onRegister(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-  const body = {
-    first_name: value(form, "first_name"),
-    last_name: value(form, "last_name"),
-    email: value(form, "email"),
-    password: value(form, "password"),
-    role: form.role.value,
-  };
-  const phone = value(form, "phone");
-  if (phone) body.phone = phone;
-  if (body.password.length < 8) {
-    showMessage("Password must be 8 to 128 characters.");
-    return;
-  }
-  if (body.password.toLowerCase() === body.email.toLowerCase()) {
-    showMessage("Password must not match the email address.");
-    return;
-  }
-  await submit(form, "/auth/register", body, async () => {
-    const login = await request("/auth/login", { email: body.email, password: body.password });
-    if (!login.response.ok) {
-      showMessage("Account created. Sign in with the same email and password.", true);
-      return;
-    }
-    sessionStorage.setItem(tokenKey, login.data.access_token);
     window.location.assign("/dashboard");
   });
 }

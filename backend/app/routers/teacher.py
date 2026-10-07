@@ -4,7 +4,9 @@
 `GET /teacher/profile` returns that account's staff profile, and
 `PATCH /teacher/profile` updates name, phone, and department.
 Assigned classes and subjects are listed under `/teacher/classes` and
-`/teacher/subjects`. Attendance marking is a later phase.
+`/teacher/subjects`. Students in an assigned class are listed at
+`/teacher/classes/{class_id}/students`. Attendance sessions, history,
+statistics, and CSV export live under `/teacher/attendance`.
 """
 
 from typing import Annotated

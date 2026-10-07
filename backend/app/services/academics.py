@@ -136,6 +136,26 @@ def get_class(db: Session, class_id: int) -> SchoolClass:
     return _require_class(db, class_id)
 
 
+def enrolled_class(db: Session, student_id: int) -> SchoolClass | None:
+    """Return the class on this student's current enrollment.
+
+    A student has at most one active enrollment. When more than one row
+    is stored, the latest `enrolled_on` wins, then the highest id.
+    """
+    class_id = db.scalar(
+        select(Enrollment.class_id)
+        .where(
+            Enrollment.student_id == student_id,
+            Enrollment.status == EnrollmentStatus.ACTIVE,
+        )
+        .order_by(Enrollment.enrolled_on.desc(), Enrollment.id.desc())
+        .limit(1)
+    )
+    if class_id is None:
+        return None
+    return db.get(SchoolClass, class_id)
+
+
 def get_class_for_teacher(db: Session, class_id: int, teacher_id: int) -> SchoolClass:
     """Return an active class assigned to this teacher."""
     school_class = _require_class(db, class_id)

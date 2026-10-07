@@ -7,7 +7,10 @@ Admins manage the student roster at `/admin/students`, teacher
 profiles at `/admin/teachers`, and classes and subjects at
 `/admin/classes` and `/admin/subjects`. Admins and teachers enroll
 faces at `/students/{student_id}/face`. Staff mark attendance from a
-camera frame at `POST /attendance/mark`.
+camera frame at `POST /attendance/mark`. Teachers read their own
+classes, subjects, students, attendance, and reports at `/teacher`.
+Students read their own profile, class, subjects, and attendance at
+`/student`.
 """
 
 import logging

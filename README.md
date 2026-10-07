@@ -62,7 +62,7 @@ Then start the API:
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The site is at [http://127.0.0.1:8000/](http://127.0.0.1:8000/). Sign in and registration are on that same server. After sign-in, the dashboard is at [http://127.0.0.1:8000/dashboard](http://127.0.0.1:8000/dashboard). Interactive API docs are at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
+The site is at [http://127.0.0.1:8000/](http://127.0.0.1:8000/). Sign in is on that same server. An admin creates teacher and student accounts, so the site has no registration page. `/register` redirects to `/login`. After sign-in, the dashboard is at [http://127.0.0.1:8000/dashboard](http://127.0.0.1:8000/dashboard). Interactive API docs are at [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs).
 
 ## Test `/health`
 
@@ -88,7 +88,7 @@ If MySQL cannot be reached, the same route returns HTTP 503:
 
 `JWT_SECRET` in `backend/.env` must be at least 32 bytes. Tokens expire after `ACCESS_TOKEN_EXPIRE_MINUTES` (default 60).
 
-Create an account, then sign in. `POST /auth/register` accepts `STUDENT`, `TEACHER`, and `ADMIN`. It stores an Argon2id password hash and returns the public user. A duplicate email returns HTTP 409. An admin can add, update, and deactivate students, teachers, and classes from the dashboard.
+An admin adds teachers and students from the dashboard. The website only offers sign in. `POST /auth/register` still accepts `STUDENT`, `TEACHER`, and `ADMIN` for the API. It stores an Argon2id password hash and returns the public user. A duplicate email returns HTTP 409. An admin can add, update, and deactivate students, teachers, and classes from the dashboard.
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/auth/register \
@@ -229,7 +229,29 @@ A new row is HTTP 201. The same student, subject, and date again is HTTP 200 and
 
 `POST /attendance/manual` records `PRESENT`, `ABSENT`, `LATE`, or `EXCUSED` for a known student without a frame. `recognition_method` is `MANUAL` and `confidence_score` is null. It follows the same duplicate rule and does not change a row that is already stored.
 
-`GET /attendance/today` lists today's rows. `GET /classes/{class_id}/attendance` lists one class, with an optional `date` and `subject_id`. `GET /students/{student_id}/attendance` is that student's history. A student reads their own history at `GET /student/attendance`. A teacher sees a class only when they are its class teacher or teach the subject. A frame that matches nobody returns HTTP 422 and stores nothing. An inactive student, or a student who is not in the class, returns HTTP 409.
+`GET /attendance/today` lists today's rows. `GET /classes/{class_id}/attendance` lists one class, with an optional `date` and `subject_id`. `GET /students/{student_id}/attendance` is that student's history. A student reads their own history at `GET /student/attendance`. A class teacher sees that class. A teacher who only teaches a subject sees that subject, not another teacher's subject in the same class. A frame that matches nobody returns HTTP 422 and stores nothing. An inactive student, or a student who is not in the class, returns HTTP 409.
+
+## Teacher dashboard
+
+A teacher signs in and uses `/dashboard`. The menu is My Classes, My Subjects, Today, History, Start attendance, and Reports. Admin pages are not shown, and opening an admin address returns the teacher to the dashboard. A student who opens an admin or teacher address is returned to the student dashboard.
+
+Assigned classes are `GET /teacher/classes`. Assigned subjects are `GET /teacher/subjects`. Students in one assigned class are `GET /teacher/classes/{class_id}/students`. Another teacher's class, and a student outside those classes, is HTTP 404. An admin or a student calling these routes is HTTP 403.
+
+Start a lesson with `POST /teacher/attendance/sessions` and a `class_id` plus `subject_id`. The same lesson and date returns the open session. `POST /teacher/attendance/sessions/{session_id}/close` closes it. Face recognition still uses `POST /attendance/mark`, and only for a class and subject assigned to that teacher.
+
+Today's rows are `GET /teacher/attendance/today`. History is `GET /teacher/attendance`, with optional `date_from`, `date_to`, `class_id`, and `subject_id`. Counts are `GET /teacher/attendance/statistics`. A spreadsheet of the same rows is `GET /teacher/attendance/export`.
+
+## Student dashboard
+
+A student signs in and uses `/dashboard`. The menu is My Profile, My Attendance, Attendance %, Calendar, and Subjects. Admin and teacher pages are not shown. Opening one of those addresses returns the student to the dashboard.
+
+`GET /student/profile` is the student's own roster row. `GET /student/class` is the active enrollment. A student who is not enrolled receives HTTP 404 from that route. `GET /student/subjects` lists active subjects in that class. A subject from another class is not included. A student with no enrollment gets an empty subject list.
+
+`GET /student/attendance` is that student's history. `subject_id`, `date_from`, and `date_to` narrow it. `GET /student/attendance/percentage` counts present, absent, late, and excused. The percentage is present and late, divided by present, absent, and late. Excused marks stay in the counts and are left out of the percentage. When nothing is counted, `percentage` is null.
+
+`GET /student/attendance/by-subject` repeats those counts for each current subject, and for any earlier subject that already has a mark. `GET /student/attendance/monthly` and `GET /student/attendance/calendar` take `year` and `month`. Omitting both uses the current month in `ATTENDANCE_TIMEZONE`. Sending only one of them returns HTTP 422. The calendar lists each day that has a mark. A day with more than one status is `MIXED`.
+
+A student cannot mark attendance. `POST /attendance/mark` and `POST /attendance/manual` return HTTP 403. Admin routes and teacher routes return HTTP 403. `GET /students/{student_id}/attendance` is for staff, so a student cannot read another student's history there. The student routes do not take another student's id.
 
 Run the automated tests from `backend/` with the virtual environment active:
 

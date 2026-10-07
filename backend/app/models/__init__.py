@@ -7,6 +7,7 @@ configures relationships. It does not open a database connection.
 from sqlalchemy.orm import configure_mappers
 
 from app.models.attendance import Attendance, AttendanceMethod, AttendanceStatus
+from app.models.attendance_session import AttendanceSession, SessionStatus
 from app.models.audit_log import AuditLog
 from app.models.base import Base
 from app.models.class_model import SchoolClass
@@ -22,7 +23,9 @@ configure_mappers()
 __all__ = [
     "Attendance",
     "AttendanceMethod",
+    "AttendanceSession",
     "AttendanceStatus",
+    "SessionStatus",
     "AuditLog",
     "Base",
     "Enrollment",
