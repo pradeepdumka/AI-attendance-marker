@@ -332,18 +332,19 @@
               <span>Image</span>
               <input name="image" type="file" accept="image/*" aria-describedby="face-hint">
             </label>
-            <div class="scanner" id="face-camera" hidden>
-              <video id="face-video" playsinline muted></video>
-              <canvas id="face-canvas" hidden></canvas>
-              <img id="face-preview" alt="Captured face" hidden>
-              <p id="face-camera-status">Start the camera, then capture one clear photo.</p>
-              <div class="actions">
-                <button class="button" type="button" id="face-camera-start">Start camera</button>
-                <button class="button" type="button" id="face-camera-snap" hidden>Capture photo</button>
-                <button class="button-quiet" type="button" id="face-camera-retake" hidden>Retake</button>
+            <div class="face-shot" id="face-camera" hidden>
+              <div class="face-shot-frame">
+                <img id="face-preview" alt="Captured face" hidden>
+                <p id="face-shot-empty">No photo yet</p>
+              </div>
+              <div>
+                <p id="face-camera-status">Open the camera and fit your face in the oval.</p>
+                <div class="actions">
+                  <button class="button" type="button" id="face-camera-open">Open camera</button>
+                </div>
               </div>
             </div>
-            <p class="field-note" id="face-hint">One clear photo. The image is checked and not stored.</p>
+            <p class="field-note" id="face-hint">One clear photo of a single face. The image is checked and not stored.</p>
             <div class="actions">
               <button class="button" type="submit" id="face-add">Add sample</button>
               <button class="button-quiet" type="button" id="face-replace">Replace samples</button>
@@ -431,17 +432,13 @@
                 <span>Subject</span>
                 <select name="subject_id"></select>
               </label>
-              <div class="scanner editor-wide" id="scanner">
-                <video id="scanner-video" playsinline muted></video>
-                <canvas id="scanner-canvas" hidden></canvas>
-                <p id="scanner-status">Choose a class and subject, then start scanning.</p>
-              </div>
             </div>
+            <p class="field-note" id="scanner-status">Choose a class and subject, then open the camera.</p>
             <div class="actions">
-              <button class="button" type="button" id="scanner-start">Start scanner</button>
+              <button class="button" type="button" id="scanner-start">Open camera</button>
               <button class="button-quiet" type="button" id="scanner-stop" disabled>Stop scanner</button>
             </div>
-            <p class="field-note">The webcam scans every few seconds and marks the closest recognized enrolled student once for this subject today.</p>
+            <p class="field-note">The camera opens in the face frame. Fit one enrolled face in the oval; a green frame marks that student for this subject today.</p>
           </form>
           <form class="panel editor" id="manual-form">
             <h2>Manual mark</h2>
@@ -481,6 +478,31 @@
     </div>
   </div>
   <button class="scrim" type="button" id="nav-scrim" hidden aria-label="Close menu"></button>
+  <dialog class="capture-dialog" id="face-capture-dialog" aria-labelledby="face-capture-title">
+    <div class="capture-head">
+      <h2 id="face-capture-title">Capture a face</h2>
+      <button class="icon-button" type="button" id="face-capture-close" aria-label="Close camera">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <div class="capture-stage">
+      <video id="face-video" playsinline muted autoplay></video>
+      <img id="face-capture-review" alt="Review the captured face" hidden>
+      <canvas id="face-canvas" hidden></canvas>
+      <div class="capture-shade" id="face-capture-shade" aria-hidden="true"></div>
+      <p class="capture-status" id="face-capture-live" role="status">Starting camera…</p>
+    </div>
+    <div class="capture-meter" id="face-capture-meter" aria-hidden="true">
+      <span id="face-capture-meter-fill"></span>
+    </div>
+    <p class="field-note" id="face-capture-hint">Fit your face inside the oval. Capture stays off until the shot is sharp and well lit.</p>
+    <div class="actions">
+      <button class="button" type="button" id="face-camera-snap" disabled>Capture photo</button>
+      <button class="button" type="button" id="face-capture-use" hidden>Use this photo</button>
+      <button class="button-quiet" type="button" id="face-capture-again" hidden>Retake</button>
+      <button class="button-quiet" type="button" id="face-capture-cancel">Cancel</button>
+    </div>
+  </dialog>
   <script src="/assets/components.js" defer></script>
   <script src="/assets/app.js" defer></script>
   <script src="/assets/dashboard.js" defer></script>

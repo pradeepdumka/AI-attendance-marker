@@ -25,7 +25,10 @@ EMBEDDING_DECIMALS = 6
 MIN_FACE_SIZE = 80
 MIN_BRIGHTNESS = 40.0
 MAX_BRIGHTNESS = 220.0
-MIN_SHARPNESS = 80.0
+# Webcam face crops are mostly skin, so a usable photo often scores well
+# below the variance of a high-contrast test pattern. Flat and heavily
+# defocused frames still fall under this line.
+MIN_SHARPNESS = 22.0
 MAX_IMAGE_SIDE = 1600
 
 
