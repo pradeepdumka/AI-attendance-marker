@@ -236,6 +236,18 @@ h3 { margin: 0 0 0.35rem; font-size: 1.45rem; }
   outline-offset: 1px;
   border-color: var(--teal);
 }
+.field input.is-generated {
+  border-color: color-mix(in srgb, var(--teal) 55%, var(--line));
+  background: color-mix(in srgb, var(--teal) 8%, white);
+  color: var(--teal-deep);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  cursor: default;
+}
+.field input.is-generated:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--teal) 55%, var(--line));
+}
 
 .roles {
   margin: 0 0 0.9rem;

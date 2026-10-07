@@ -25,7 +25,7 @@ const lists = {
       field("last_name", "Last name", { required: true }),
       field("email", "Email", { type: "email", required: true }),
       field("phone", "Phone", { clearable: true }),
-      field("employee_id", "Employee ID", { required: true }),
+      field("employee_id", "Employee ID", { generated: "T" }),
       field("department", "Department", { clearable: true }),
       field("password", "Password", { type: "password", wide: true }),
       field("status", "Status", { type: "select", options: statusOptions }),
@@ -50,7 +50,7 @@ const lists = {
       field("last_name", "Last name", { required: true }),
       field("email", "Email", { type: "email", required: true }),
       field("phone", "Phone", { clearable: true }),
-      field("roll_number", "Roll number", { required: true }),
+      field("roll_number", "Roll number", { generated: "S" }),
       field("date_of_birth", "Date of birth", { type: "date", clearable: true }),
       field("gender", "Gender", {
         type: "select",
@@ -820,6 +820,11 @@ function field(name, labelText, options = {}) {
   return { name, label: labelText, ...options };
 }
 
+function uniqueCode(prefix) {
+  const token = crypto.randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase();
+  return `${prefix}-${token}`;
+}
+
 async function loadDetail(ticket) {
   const list = catalog();
   document.getElementById("detail-fields").replaceChildren();
@@ -954,6 +959,14 @@ function fieldControl(item, row) {
       control.autocomplete = "new-password";
       control.maxLength = 128;
     }
+    if (item.generated) {
+      control.readOnly = true;
+      control.maxLength = 50;
+      control.autocomplete = "off";
+      control.spellcheck = false;
+      control.setAttribute("aria-readonly", "true");
+      control.classList.add("is-generated");
+    }
   } else {
     const choices = item.source === "teachers"
       ? teacherChoices(row, item)
@@ -967,10 +980,20 @@ function fieldControl(item, row) {
       control.append(option);
     }
   }
-  const current = row ? row[item.name] : item.name === "status" ? "ACTIVE" : "";
+  const current = row
+    ? row[item.name]
+    : item.generated
+      ? uniqueCode(item.generated)
+      : item.name === "status"
+        ? "ACTIVE"
+        : "";
   control.value = current == null ? "" : String(current);
   wrap.append(control);
-  if (item.type === "password") {
+  if (item.generated) {
+    const hint = document.createElement("small");
+    hint.textContent = "Assigned automatically.";
+    wrap.append(hint);
+  } else if (item.type === "password") {
     const hint = document.createElement("small");
     hint.textContent = row
       ? "Leave blank to keep the current password."
@@ -1062,6 +1085,10 @@ function collectEditor(list, row) {
   const body = {};
   for (const item of list.fields) {
     const raw = value(form, item.name);
+    if (item.generated) {
+      if (!row) body[item.name] = raw || uniqueCode(item.generated);
+      continue;
+    }
     if (item.type === "password") {
       if (!raw) {
         if (!row) return { error: "Enter a password." };
