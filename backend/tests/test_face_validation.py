@@ -204,16 +204,32 @@ def test_default_detector_and_encoder_use_face_recognition(monkeypatch) -> None:
     assert embedding[0] == 0.0
 
 
-def test_a_missing_face_recognition_library_is_reported(monkeypatch) -> None:
+def _block_face_recognition(monkeypatch) -> None:
     monkeypatch.delitem(sys.modules, "face_recognition", raising=False)
     real_import = __import__
 
     def blocked(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "face_recognition":
+        if name == "face_recognition" or name.startswith("face_recognition."):
             raise ImportError("blocked")
         return real_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr("builtins.__import__", blocked)
+
+
+def test_a_missing_face_recognition_library_uses_opencv(monkeypatch) -> None:
+    _block_face_recognition(monkeypatch)
+    # Smaller than the cascade minimum, so the fallback finds nothing.
+    assert detect_faces(np.zeros((8, 8, 3), dtype=np.uint8)) == []
+
+
+def test_a_missing_face_detector_is_reported(monkeypatch) -> None:
+    _block_face_recognition(monkeypatch)
+
+    class EmptyDetector:
+        def empty(self) -> bool:
+            return True
+
+    monkeypatch.setattr(cv2, "CascadeClassifier", lambda _path: EmptyDetector())
     with pytest.raises(FaceRecognitionUnavailable) as caught:
         detect_faces(np.zeros((8, 8, 3), dtype=np.uint8))
     assert caught.value.detail == "Face recognition is not available"
