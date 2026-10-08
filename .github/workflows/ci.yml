@@ -109,6 +109,21 @@ jobs:
           script_stop: true
           script: |
             set -euo pipefail
+            # The instance has about 1 GB of RAM. MySQL 8.4 is OOM-killed
+            # during startup unless swap can absorb the spike.
+            if ! sudo swapon --show | grep -q .; then
+              if [ ! -f /swapfile ]; then
+                sudo fallocate -l 1G /swapfile
+                sudo chmod 600 /swapfile
+                sudo mkswap /swapfile
+              fi
+              sudo swapon /swapfile
+            fi
+            if ! grep -qE '^/swapfile[[:space:]]' /etc/fstab; then
+              echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+            fi
+            echo 'vm.swappiness=10' | sudo tee /etc/sysctl.d/99-swappiness.conf >/dev/null
+            sudo sysctl -w vm.swappiness=10 >/dev/null
             sudo docker compose --env-file ~/.env -f ~/docker-compose.ec2.yaml pull
             sudo docker compose --env-file ~/.env -f ~/docker-compose.ec2.yaml up -d --remove-orphans --wait --wait-timeout 300
             sudo docker compose --env-file ~/.env -f ~/docker-compose.ec2.yaml ps

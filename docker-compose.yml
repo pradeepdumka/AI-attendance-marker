@@ -27,7 +27,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent",
+          "mysql -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" -N -e \"SELECT 1\" >/dev/null",
         ]
       interval: 5s
       timeout: 5s

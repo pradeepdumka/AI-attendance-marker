@@ -15,6 +15,10 @@ services:
   db:
     image: mysql:8.4
     restart: unless-stopped
+    # The image starts a temporary server with `mysqld --daemonize` while it
+    # sets the root password. Without a TTY that step exits and leaves root
+    # with an empty password.
+    tty: true
     logging: *json-logs
     environment:
       # Root password falls back to MYSQL_PASSWORD so a .env that uses
@@ -43,22 +47,36 @@ services:
           echo "Set MYSQL_PASSWORD in .env. When MYSQL_USER is not root, also set MYSQL_ROOT_PASSWORD." >&2
           exit 1
         fi
+        # About 1 GB of RAM on the instance. Defaults make mysqld use
+        # ~400 MB and the kernel OOM-kills it before the health check passes.
         exec /usr/local/bin/docker-entrypoint.sh mysqld \
           --character-set-server=utf8mb4 \
           --collation-server=utf8mb4_unicode_ci \
-          --default-time-zone=+00:00
+          --default-time-zone=+00:00 \
+          --innodb-buffer-pool-size=48M \
+          --innodb-buffer-pool-instances=1 \
+          --performance-schema=OFF \
+          --max-connections=20 \
+          --table-open-cache=32 \
+          --table-definition-cache=32 \
+          --thread-stack=256K \
+          --tmp-table-size=8M \
+          --max-heap-table-size=8M \
+          --key-buffer-size=8M \
+          --innodb-log-buffer-size=4M \
+          --disable-log-bin
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent",
+          "mysql -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" -N -e \"SELECT 1\" >/dev/null",
         ]
       interval: 5s
       timeout: 5s
       retries: 30
-      start_period: 20s
+      start_period: 45s
 
   api:
     image: ${API_IMAGE:-pradeepdumka/ai-attendance-marker:latest}
