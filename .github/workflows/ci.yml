@@ -54,91 +54,62 @@ jobs:
       - name: Run tests
         run: pytest
 
-  docker:
-    needs: test
+docker:
+    name: Docker Build and Push
     runs-on: ubuntu-latest
+    needs:
+      - test
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
+      - name: Login to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build the API image
+      - name: Build and push backend Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
-          load: true
-          push: false
-          tags: ai-attendance-api:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          file: Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          tags: pradeepdumka/ai-attendance-marker:latest
 
-      - name: Start MySQL and the API
-        run: |
-          cat > .env <<'EOF'
-          APP_ENV=test
-          MYSQL_USER=root
-          MYSQL_PASSWORD=ci-db-password
-          MYSQL_DATABASE=ai_attendance
-          JWT_SECRET=ci-test-secret-at-least-thirty-two-bytes-long
-          ATTENDANCE_TIMEZONE=UTC
-          EOF
-          cat > docker-compose.ci.yml <<'EOF'
-          services:
-            api:
-              image: ai-attendance-api:ci
-          EOF
-          docker compose -f docker-compose.yml -f docker-compose.ci.yml up -d --no-build
-
-      - name: Wait until the API is healthy
-        run: |
-          for _ in $(seq 1 36); do
-            body="$(curl -fsS http://127.0.0.1:8000/health || true)"
-            printf '%s\n' "$body"
-            if printf '%s' "$body" | grep -q '"database":"connected"'; then
-              exit 0
-            fi
-            sleep 5
-          done
-          docker compose -f docker-compose.yml -f docker-compose.ci.yml logs
-          exit 1
-
-      - name: Stop the stack
-        if: ${{ !cancelled() }}
-        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml down -v
-
-  deploy:
-    needs: docker
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+deploy:
+    name: Deploy to AWS EC2
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      actions: write
-      packages: write
+    needs:
+      - docker
+    if: github.event_name == 'push'
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - uses: docker/setup-buildx-action@v3
-
-      - uses: docker/login-action@v3
+      - name: Copy Docker Compose file to EC2
+        uses: appleboy/scp-action@v0.1.7
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          source: docker-compose.ec2.yaml
+          target: ~/
 
-      - id: meta
-        uses: docker/metadata-action@v5
+      - name: Deploy latest images on EC2
+        uses: appleboy/ssh-action@v1.2.0
         with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=raw,value=latest
-            type=sha
-
-      - name: Publish the API image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          command_timeout: 30m
+          script_stop: true
+          script: |
+            set -euo pipefail
+            sudo docker compose --env-file ~/.env -f ~/docker-compose.ec2.yaml pull
+            sudo docker compose --env-file ~/.env -f ~/docker-compose.ec2.yaml up -d --remove-orphans --wait --wait-timeout 300
+            sudo docker compose --env-file ~/.env -f ~/docker-compose.ec2.yaml ps
+            sudo docker image prune -f

@@ -1,0 +1,107 @@
+# EC2 runtime. GitHub Actions copies this file to the instance and runs
+# `docker compose pull` then `up --wait`. Secrets stay in ~/.env on the host.
+# MySQL is reachable only from this machine (SSH tunnel). Open APP_PORT in the
+# security group; leave 3306 closed.
+
+name: ai-attendance
+
+x-logging: &json-logs
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  db:
+    image: mysql:8.4
+    restart: unless-stopped
+    logging: *json-logs
+    environment:
+      # Root password falls back to MYSQL_PASSWORD so a .env that uses
+      # MYSQL_USER=root does not need a second secret.
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-${MYSQL_PASSWORD:-}}
+      MYSQL_ROOT_HOST: ${MYSQL_ROOT_HOST:-%}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ai_attendance}
+      MYSQL_USER: ${MYSQL_USER:-root}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-}
+    ports:
+      - "127.0.0.1:${MYSQL_PORT:-3306}:3306"
+    # Inlined so the instance does not need docker/mysql-entrypoint.sh.
+    # The official image rejects MYSQL_USER=root.
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -eu
+        if [ "$${MYSQL_USER:-}" = "root" ]; then
+          if [ -z "$${MYSQL_ROOT_PASSWORD:-}" ]; then
+            export MYSQL_ROOT_PASSWORD="$${MYSQL_PASSWORD:-}"
+          fi
+          unset MYSQL_USER
+          unset MYSQL_PASSWORD
+        fi
+        if [ -z "$${MYSQL_ROOT_PASSWORD:-}" ]; then
+          echo "Set MYSQL_PASSWORD in .env. When MYSQL_USER is not root, also set MYSQL_ROOT_PASSWORD." >&2
+          exit 1
+        fi
+        exec /usr/local/bin/docker-entrypoint.sh mysqld \
+          --character-set-server=utf8mb4 \
+          --collation-server=utf8mb4_unicode_ci \
+          --default-time-zone=+00:00
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+
+  api:
+    image: ${API_IMAGE:-pradeepdumka/ai-attendance-marker:latest}
+    pull_policy: always
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 20s
+    logging: *json-logs
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      APP_NAME: ${APP_NAME:-AI Attendance Marker}
+      APP_ENV: ${APP_ENV:-production}
+      DEBUG: ${DEBUG:-false}
+      HOST: 0.0.0.0
+      PORT: 8000
+      MYSQL_HOST: db
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_USER:-attendance}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-ai_attendance}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
+      FACE_MATCH_THRESHOLD: ${FACE_MATCH_THRESHOLD:-0.6}
+      FACE_EMBEDDING_CACHE_SECONDS: ${FACE_EMBEDDING_CACHE_SECONDS:-60}
+      ATTENDANCE_TIMEZONE: ${ATTENDANCE_TIMEZONE:-UTC}
+      ATTENDANCE_LATE_AFTER: ${ATTENDANCE_LATE_AFTER:-}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+
+volumes:
+  mysql_data:
