@@ -1404,10 +1404,17 @@ async function openFaceCapture() {
   await startFaceCamera();
 }
 
+function cameraUnavailableMessage(action) {
+  if (!window.isSecureContext) {
+    return `The camera needs HTTPS. This page is open over HTTP, so the browser will not allow webcam ${action}.`;
+  }
+  return `This browser does not support webcam ${action}.`;
+}
+
 async function startFaceCamera() {
   if (!navigator.mediaDevices?.getUserMedia) {
     closeFaceCapture();
-    showMessage("This browser does not support webcam capture.");
+    showMessage(cameraUnavailableMessage("capture"));
     return;
   }
   stopFaceCameraTracks();
@@ -2101,7 +2108,7 @@ async function startScanner() {
     return;
   }
   if (!navigator.mediaDevices?.getUserMedia) {
-    showMessage("This browser does not support webcam scanning.");
+    showMessage(cameraUnavailableMessage("scanning"));
     return;
   }
   setScannerControls(true);
