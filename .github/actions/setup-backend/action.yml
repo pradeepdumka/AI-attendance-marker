@@ -28,3 +28,5 @@ runs:
         pip install "face-recognition-models>=0.3.0" "Pillow>=10"
         grep -vi '^face-recognition' requirements.txt > /tmp/requirements.ci.txt
         pip install -r /tmp/requirements.ci.txt
+        # face_recognition_models imports pkg_resources. Setuptools 82 removed it.
+        pip install "setuptools>=70,<81"
