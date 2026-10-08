@@ -844,8 +844,18 @@ function field(name, labelText, options = {}) {
 }
 
 function uniqueCode(prefix) {
-  const token = crypto.randomUUID().replace(/-/g, "").slice(0, 12).toUpperCase();
-  return `${prefix}-${token}`;
+  return `${prefix}-${randomHex(12)}`;
+}
+
+function randomHex(length) {
+  // randomUUID() exists only on HTTPS. This app is served over HTTP on the
+  // server, and that call was leaving the add-teacher and add-student forms blank.
+  const bytes = new Uint8Array(Math.ceil(length / 2));
+  if (globalThis.crypto?.getRandomValues) crypto.getRandomValues(bytes);
+  else {
+    for (let index = 0; index < bytes.length; index += 1) bytes[index] = Math.floor(Math.random() * 256);
+  }
+  return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, length).toUpperCase();
 }
 
 async function loadDetail(ticket) {
@@ -949,22 +959,26 @@ async function loadForm(ticket) {
   const list = lists[route.resource];
   const editor = document.getElementById("editor");
   editor.hidden = true;
-  let row = null;
-  if (route.id) {
-    const { response, data } = await request(`${list.path}/${route.id}`);
-    if (ticket !== routeTicket) return;
-    if (!response.ok) {
-      showMessage(response.status === 403 ? "Admin access is required." : errorText(data));
-      return;
+  try {
+    let row = null;
+    if (route.id) {
+      const { response, data } = await request(`${list.path}/${route.id}`);
+      if (ticket !== routeTicket) return;
+      if (!response.ok) {
+        showMessage(response.status === 403 ? "Admin access is required." : errorText(data));
+        return;
+      }
+      row = data;
     }
-    row = data;
+    await prepareSources(list);
+    if (ticket !== routeTicket) return;
+    editing = row;
+    document.getElementById("editor-fields").replaceChildren(...list.fields.map((item) => fieldControl(item, row)));
+    editor.hidden = false;
+    editor.querySelector("input, select")?.focus();
+  } catch {
+    if (ticket === routeTicket) showMessage("The form could not be opened.");
   }
-  await prepareSources(list);
-  if (ticket !== routeTicket) return;
-  editing = row;
-  document.getElementById("editor-fields").replaceChildren(...list.fields.map((item) => fieldControl(item, row)));
-  editor.hidden = false;
-  editor.querySelector("input, select")?.focus();
 }
 
 function fieldControl(item, row) {
